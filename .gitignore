@@ -1,0 +1,20 @@
+# Claude Code local files
+.claude/
+
+# Per user request: exclude from public repo
+legacy/
+log-analysis/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Node
+node_modules/
+
+# Environment
+.env
+.env.local
