@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <title>Bots in a Field - Strategy Builder v11</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -69,20 +70,20 @@
       </div>
     </header>
 
-    <nav class="tab-nav">
-      <button class="tab-btn active" data-tab="stats">
+    <nav class="tab-nav" role="tablist">
+      <button class="tab-btn active" data-tab="stats" role="tab" aria-selected="true" aria-controls="stats-tab">
         <span class="tab-icon"><svg><use href="#icon-stats"/></svg></span>
         Stats
       </button>
-      <button class="tab-btn" data-tab="strategy">
+      <button class="tab-btn" data-tab="strategy" role="tab" aria-selected="false" aria-controls="strategy-tab">
         <span class="tab-icon"><svg><use href="#icon-strategy"/></svg></span>
         Strategy
       </button>
-      <button class="tab-btn" data-tab="lifecycle">
+      <button class="tab-btn" data-tab="lifecycle" role="tab" aria-selected="false" aria-controls="lifecycle-tab">
         <span class="tab-icon"><svg><use href="#icon-lifecycle"/></svg></span>
         Lifecycle
       </button>
-      <button class="tab-btn" data-tab="settings">
+      <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false" aria-controls="settings-tab">
         <span class="tab-icon"><svg><use href="#icon-settings"/></svg></span>
         Settings
       </button>
@@ -177,21 +178,21 @@
       <!-- Strategy Tab -->
       <div id="strategy-tab" class="tab-content">
         <div class="mode-tabs">
-          <div class="mode-tab active" data-mode="simple">
+          <button class="mode-tab active" data-mode="simple" role="tab" tabindex="0">
             <div class="mode-badge">Beginner</div>
             <div class="mode-name">Simple</div>
             <div class="mode-desc">Blend preset behaviors with weight sliders</div>
-          </div>
-          <div class="mode-tab" data-mode="advanced">
+          </button>
+          <button class="mode-tab" data-mode="advanced" role="tab" tabindex="0">
             <div class="mode-badge">Intermediate</div>
             <div class="mode-name">Advanced</div>
             <div class="mode-desc">Build IF-THEN rule lists</div>
-          </div>
-          <div class="mode-tab" data-mode="expert">
+          </button>
+          <button class="mode-tab" data-mode="expert" role="tab" tabindex="0">
             <div class="mode-badge">Advanced</div>
             <div class="mode-name">Expert</div>
             <div class="mode-desc">Visual finite state machine editor</div>
-          </div>
+          </button>
         </div>
 
         <!-- Simple Mode -->

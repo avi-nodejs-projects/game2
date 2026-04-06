@@ -148,10 +148,22 @@ function initSimulationControlsUI() {
   });
 
   document.getElementById('copy-log-btn').addEventListener('click', () => {
-    const textarea = document.getElementById('log-output');
-    textarea.select();
-    document.execCommand('copy');
-    alert('Log copied to clipboard!');
+    const text = document.getElementById('log-output').value;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Log copied to clipboard!');
+      }).catch(() => {
+        const textarea = document.getElementById('log-output');
+        textarea.select();
+        document.execCommand('copy');
+        alert('Log copied to clipboard!');
+      });
+    } else {
+      const textarea = document.getElementById('log-output');
+      textarea.select();
+      document.execCommand('copy');
+      alert('Log copied to clipboard!');
+    }
   });
 
   document.getElementById('download-log-btn').addEventListener('click', () => {

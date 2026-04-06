@@ -2,7 +2,6 @@
 
 // ============ CANVAS & CONTEXT ============
 let canvas, ctx;
-let statsDiv;
 let rafHandle = null; // requestAnimationFrame handle for cancellation
 
 // ============ GAME STATE ============
@@ -647,33 +646,6 @@ function updateUI() {
   const actionEl = document.getElementById('hud-action');
   if (actionEl) actionEl.textContent = `Action: ${bot.lastAction || 'idle'}`;
 
-  // Also update the legacy statsDiv for backwards compatibility
-  if (statsDiv) {
-    const playerLabel = bot.isPlayer ? ' (YOUR BOT)' : '';
-    let strategyInfo = '';
-    if (bot.isPlayer) {
-      strategyInfo = `<br><br><strong>Strategy Mode:</strong> ${strategyMode}`;
-      if (strategyMode === 'expert') {
-        const currentState = states.find(s => s.id === bot.currentFSMState);
-        strategyInfo += `<br>Current State: ${currentState ? currentState.name : bot.currentFSMState}`;
-      }
-    }
-    const bonusInfo = bot.isPlayer ? `<br>Bonus Stat: ${bot.preferredStat}` : '';
-    statsDiv.innerHTML = `
-      <strong>Following Bot #${camera.followIndex + 1}${playerLabel}</strong><br>
-      <span style="display:inline-block;width:10px;height:10px;background:hsl(${bot.hue},60%,50%);border-radius:50%;margin-right:5px;"></span>
-      Hue: ${Math.floor(bot.hue)}<br><br>
-      <strong>Stats:</strong><br>
-      Speed: ${bot.speed.toFixed(1)}<br>
-      Attack: ${bot.attack.toFixed(1)}<br>
-      Defence: ${bot.defence.toFixed(1)}<br>
-      Lives: ${bot.lives.toFixed(1)}${bonusInfo}${strategyInfo}<br><br>
-      <strong>Position:</strong><br>
-      X: ${Math.floor(bot.x)} / ${WORLD_WIDTH}<br>
-      Y: ${Math.floor(bot.y)} / ${WORLD_HEIGHT}<br><br>
-      <strong>Camera:</strong> ${camera.autoFollow ? 'Auto' : 'Manual'}
-    `;
-  }
 }
 
 // ============ GAME LOOP ============
@@ -724,7 +696,7 @@ function animate() {
   drawTargetLine();
   drawMinimap();
   updateUI();
-  updateDebugPanel();
+  if (frameCount % 10 === 0) updateDebugPanel();
   updateSimulationStatus();
   updateStrongestBotDisplay();
 
@@ -1206,8 +1178,6 @@ function initKeyboardControls() {
 function init() {
   canvas = document.getElementById('field');
   ctx = canvas.getContext('2d');
-  statsDiv = document.getElementById('stats');
-
   canvas.width = 900;
   canvas.height = 700;
 
