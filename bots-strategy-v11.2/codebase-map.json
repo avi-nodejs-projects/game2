@@ -1,0 +1,246 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-12-17",
+  "files": {
+    "js/config.js": {
+      "purpose": "All game constants, settings, behavior/rule definitions, and shared state",
+      "exports": {
+        "constants": ["WORLD_WIDTH", "WORLD_HEIGHT", "BOT_COUNT", "DOT_COUNT", "STARTING_STATS", "TOTAL_POINTS", "MIN_STAT"],
+        "state": ["playerStats", "preferredBonusStat", "strategyMode", "debugMode", "showTargetLine", "showContextValues", "lastDecisionInfo", "simulationLog", "decisionCount", "simulationRunning", "simulationPaused", "frameCount", "simulationSpeed", "behaviorWeights", "rules", "states", "transitions", "currentStateId", "selectedState", "selectedTool", "transitionStart", "corpses", "packs", "nextPackId", "protectionPairs"],
+        "settings": ["globalSettings", "simulationSettings", "npcSettings", "lifecycleSettings", "billboardSettings"],
+        "definitions": ["BEHAVIORS", "SUBJECTS", "OPERATORS", "ACTIONS", "RULE_TEMPLATES", "CONDITION_PRESETS", "STATE_ACTIONS", "NPC_STRATEGY_TEMPLATES"],
+        "defaults": ["DEFAULT_PLAYER_STATS", "DEFAULT_GLOBAL_SETTINGS", "DEFAULT_SIMULATION_SETTINGS", "DEFAULT_NPC_SETTINGS", "DEFAULT_BILLBOARD_SETTINGS", "DEFAULT_RULES", "DEFAULT_STATES", "DEFAULT_TRANSITIONS"]
+      }
+    },
+    "js/game.js": {
+      "purpose": "Core game entities - YellowDot and Bot classes with all AI logic",
+      "classes": {
+        "YellowDot": {
+          "methods": ["constructor", "respawn", "draw"]
+        },
+        "Bot": {
+          "methods": ["constructor", "initializeStats", "generateRandomStats", "assignRandomStrategy", "resetStats", "applyDeathPenalty", "inheritFromKiller", "handleDeath", "spawnAtRandom", "findNearestDot", "findNearestBot", "findWeakestBot", "findSafestDot", "findDotClusters", "evaluateCombatAdvantage", "countNearbyEnemies", "distanceTo", "getContext", "evaluateCondition", "executeAction", "pickNewTarget", "pickTargetNPCStrategy", "pickNewTargetSimple", "checkEmergencyOverride", "pickTargetSimpleMode", "pickTargetAdvancedMode", "pickTargetExpertMode", "executeStateAction", "addRandomStat", "addPartialRandomStat", "applyRespawnPenalty", "update", "draw"]
+        }
+      }
+    },
+    "js/ui.js": {
+      "purpose": "Setup UI, tab navigation, and all three strategy mode editors",
+      "exports": {
+        "functions": ["getUsedPoints", "updateStatsUI", "initStatsUI", "initTabNavigation", "randomizeBehaviorWeights", "renderBehaviorList", "renderRuleList", "initAdvancedModeUI", "addTestRulesButton", "testRules", "loadTemplate", "addTemplateButtons", "initStateMachineUI", "handleStateCanvasClick", "handleStateCanvasMouseDown", "handleStateCanvasMouseMove", "renderStateMachine", "updateStateEditor", "initLifecycleUI", "updateLifecycleUI", "updateBillboardUI", "initSettingsUI", "initSimulationControlsUI", "deepMerge", "exportConfig", "importConfig", "initImportExportUI", "resetToDefaults", "initUI"]
+      }
+    },
+    "js/main.js": {
+      "purpose": "Game loop, 4-panel rendering dispatch, camera, collision detection, heat map, tactical overlays, and initialization",
+      "exports": {
+        "state": ["canvas", "ctx", "primaryRC", "yellowDots", "bots", "playerBot", "camera", "activePanel", "fullscreenPanel", "showHeatMap", "showThreatRanges", "heatMapGrid"],
+        "functions": ["createRenderContext", "worldToScreen", "isVisible", "getScale", "checkBotDotCollision", "checkBotBotCollision", "handleCombat", "handleBotDeath", "handleAgeDeath", "handleStarvationDeath", "processCollisions", "drawField", "drawWorldBoundary", "drawMinimap", "drawHeatMap", "drawThreatRanges", "drawPackTerritories", "recordHeatEvent", "decayHeatMap", "resetHeatMap", "convexHull", "updateCamera", "updateUI", "animate", "runGameUpdate", "updateSimulationStatus", "findStrongestBot", "updateStrongestBotDisplay", "startGame", "stopSimulation", "setActivePanel", "toggleFullscreen", "initPanelChrome", "initCanvasResize", "initKeyboardControls", "init"]
+      }
+    },
+    "js/lifecycle.js": {
+      "purpose": "Lifecycle mechanics - invincibility, starvation, and age systems",
+      "exports": {
+        "invincibility": ["applyInvincibility", "updateInvincibility", "isInvincible", "breakInvincibility", "canDealDamageWhileInvincible", "shouldBreakInvincibilityOnCombat"],
+        "starvation": ["resetStarvationTimer", "updateStarvation", "applyStarvationStatDecay", "getStarvationProgress"],
+        "age": ["updateAge", "getAgeProgress", "getAgeVisualFactor", "handleAgeDeath"],
+        "helpers": ["initBotLifecycleProperties", "resetBotLifecycleOnRespawn", "shouldApplyLifecycleToBot"]
+      }
+    },
+    "js/reproduction.js": {
+      "purpose": "Asexual and sexual reproduction, stat inheritance, strategy blending",
+      "exports": {
+        "asexual": ["canReproduceAsexual", "isMature", "reproduceAsexual", "calculateOffspringStatsAsexual", "calculateSpawnPosition", "checkAsexualReproduction"],
+        "sexual": ["canReproduceSexual", "updateMatingProgress", "reproduceSexual", "calculateOffspringStatsSexual", "updateAllMatingProgress"],
+        "offspring": ["createOffspring", "blendHue", "inheritStrategy"],
+        "cooldown": ["updateReproductionCooldowns"]
+      }
+    },
+    "js/relationships.js": {
+      "purpose": "Parent/child tracking, protection system, lineage",
+      "exports": {
+        "tracking": ["setParent", "getParent", "getChildren", "getGeneration", "getAllDescendants", "getAllAncestors", "areRelated"],
+        "protection": ["addProtection", "isProtected", "updateProtections", "getProtectedBots", "clearBotProtections", "shouldProtectByGeneration"],
+        "cleanup": ["clearRelationshipsOnDeath", "resetRelationshipsOnRespawn"]
+      }
+    },
+    "js/packs.js": {
+      "purpose": "Pack formation, management, territory, and cannibalism",
+      "exports": {
+        "similarity": ["calculateStrategySimilarity"],
+        "formation": ["createPack", "joinPack", "leavePack", "disbandPack", "selectPackLeader", "findWeakestPackMember", "evaluatePackFormation", "handlePackFormation"],
+        "queries": ["getPackMembers", "arePackMates", "getBotPack"],
+        "updates": ["updatePacks"],
+        "territory": ["updatePackTerritory", "findNearestDotCluster", "findNearestEnemyCluster", "isInTerritory", "getTerritoryOwner", "isDefendingTerritory"],
+        "cannibalism": ["canCannibalize", "selectCannibalismTarget"],
+        "respawn": ["handlePackMemberRespawn"]
+      }
+    },
+    "js/corpse.js": {
+      "purpose": "Corpse entities from dead bots - creation, expiration, consumption",
+      "classes": {
+        "Corpse": {
+          "methods": ["constructor", "update", "getTimeRemaining", "getFadeAlpha", "draw"]
+        }
+      },
+      "exports": {
+        "functions": ["createCorpse", "updateCorpses", "drawCorpses", "checkBotCorpseCollision", "canConsumeCorpse", "consumeCorpse", "processCorpseCollisions", "clearCorpses"]
+      }
+    },
+    "js/debug.js": {
+      "purpose": "Debug panel UI and target line visualization",
+      "exports": {
+        "functions": ["updateDebugPanel", "drawTargetLine", "initDebugUI"]
+      }
+    },
+    "js/log.js": {
+      "purpose": "Simulation logging for decision/event capture and export",
+      "exports": {
+        "init": ["initSimulationLog", "captureConfig", "captureStrategy", "captureInitialState"],
+        "capture": ["captureBot", "captureDot", "round", "captureRelevantContext", "captureWorldState", "captureFinalState"],
+        "logging": ["logDecision", "logEvent", "logCombat", "logDotCollected", "logBotRespawn"],
+        "output": ["generateLogOutput", "generateCompactLog", "updateLogOutput", "showLogPanel", "hideLogPanel"],
+        "control": ["pauseSimulation", "resumeSimulation", "resetSimulationLog"]
+      }
+    },
+    "js/billboards.js": {
+      "purpose": "Decorative billboard advertisements near dot clusters",
+      "classes": {
+        "Billboard": {
+          "methods": ["constructor", "update", "getOpacity", "draw", "drawBrand"]
+        }
+      },
+      "exports": {
+        "data": ["BRAND_LOGOS", "billboards"],
+        "functions": ["findDotClustersForBillboards", "spawnBillboard", "updateBillboards", "drawBillboards"]
+      }
+    },
+    "js/panel-relationship.js": {
+      "purpose": "Panel 2: Force-directed graph visualization of bot relationships (pack bonds, parent-child, combat, mating)",
+      "exports": {
+        "state": ["relWeb", "STRATEGY_COLORS"],
+        "functions": ["initRelationshipPanel", "syncRelationshipNodes", "computeForces", "drawRelationshipGraph", "getEdgesForGraph", "getNodeRadius", "getStrategyColor", "onRelWebCombat"]
+      }
+    },
+    "js/panel-timeline.js": {
+      "purpose": "Panel 3: Scrolling stacked area chart of population by strategy type and average stats over time",
+      "exports": {
+        "state": ["timeline"],
+        "functions": ["initTimelinePanel", "captureTimelineSnapshot", "recordTimelineEvent", "drawTimeline", "resetTimeline"]
+      }
+    },
+    "js/panel-battlecam.js": {
+      "purpose": "Panel 4: Auto-directed cinematic camera that finds and shows the most interesting action using interest scoring",
+      "exports": {
+        "state": ["battleCam"],
+        "functions": ["initBattleCamPanel", "scoreInterest", "updateBattleCamDirector", "updateBattleCamCamera", "drawBattleCam", "drawVignette", "drawBattleCamOverlay", "onBattleCamKill", "resetBattleCam"]
+      }
+    }
+  },
+  "taskPatterns": {
+    "add_behavior": {
+      "description": "Add a new bot behavior (e.g., 'Defender', 'Explorer')",
+      "files": ["js/config.js:BEHAVIORS", "js/game.js:pickTargetSimpleMode+executeAction", "js/ui.js:renderBehaviorList"]
+    },
+    "add_rule_subject": {
+      "description": "Add a new context variable for rule conditions",
+      "files": ["js/config.js:SUBJECTS", "js/game.js:getContext"]
+    },
+    "add_rule_template": {
+      "description": "Add a predefined rule set template",
+      "files": ["js/config.js:RULE_TEMPLATES", "js/ui.js:addTemplateButtons"]
+    },
+    "add_lifecycle_feature": {
+      "description": "Add new lifecycle mechanic (e.g., hunger, sleep)",
+      "files": ["js/config.js:lifecycleSettings", "js/lifecycle.js", "js/main.js:runGameUpdate", "js/ui.js:initLifecycleUI"]
+    },
+    "modify_combat": {
+      "description": "Change combat mechanics, damage, or death handling",
+      "files": ["js/main.js:handleCombat+handleBotDeath", "js/game.js:evaluateCombatAdvantage"]
+    },
+    "add_npc_feature": {
+      "description": "Add NPC-specific mechanics (evolution, strategies)",
+      "files": ["js/config.js:npcSettings+NPC_STRATEGY_TEMPLATES", "js/game.js:initializeStats+assignRandomStrategy"]
+    },
+    "modify_reproduction": {
+      "description": "Change reproduction mechanics or inheritance",
+      "files": ["js/config.js:lifecycleSettings.reproduction", "js/reproduction.js", "js/relationships.js"]
+    },
+    "add_pack_feature": {
+      "description": "Extend pack mechanics (roles, behaviors)",
+      "files": ["js/config.js:lifecycleSettings.packs", "js/packs.js", "js/relationships.js"]
+    },
+    "add_visual_effect": {
+      "description": "Add bot/corpse/billboard visual effect",
+      "files": ["js/game.js:Bot.draw", "js/corpse.js:Corpse.draw", "js/billboards.js:Billboard.draw"]
+    },
+    "modify_logging": {
+      "description": "Change log output format or add event types",
+      "files": ["js/config.js:simulationSettings", "js/log.js"]
+    },
+    "change_ui_layout": {
+      "description": "Modify setup UI structure or add tabs",
+      "files": ["index.html", "styles.css", "js/ui.js"]
+    },
+    "add_settings_section": {
+      "description": "Add new configurable settings group",
+      "files": ["js/config.js", "js/ui.js:initSettingsUI", "index.html"]
+    },
+    "add_simulation_control": {
+      "description": "Add simulation control buttons (start, stop, pause)",
+      "files": ["index.html", "styles.css", "js/main.js", "js/ui.js:initSimulationControlsUI"]
+    },
+    "modify_defaults": {
+      "description": "Change default values for settings",
+      "files": ["js/config.js:DEFAULT_*", "js/ui.js:resetToDefaults"]
+    }
+  },
+  "dependencies": {
+    "js/config.js": {
+      "importedBy": ["game.js", "ui.js", "main.js", "lifecycle.js", "reproduction.js", "relationships.js", "packs.js", "corpse.js", "debug.js", "log.js", "billboards.js"],
+      "imports": []
+    },
+    "js/game.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js", "log.js"]
+    },
+    "js/ui.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js", "game.js"]
+    },
+    "js/main.js": {
+      "importedBy": [],
+      "imports": ["config.js", "game.js", "ui.js", "debug.js", "log.js", "lifecycle.js", "reproduction.js", "relationships.js", "packs.js", "corpse.js", "billboards.js"]
+    },
+    "js/lifecycle.js": {
+      "importedBy": ["main.js", "reproduction.js"],
+      "imports": ["config.js", "log.js"]
+    },
+    "js/reproduction.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js", "lifecycle.js", "relationships.js", "packs.js", "log.js"]
+    },
+    "js/relationships.js": {
+      "importedBy": ["main.js", "reproduction.js", "packs.js"],
+      "imports": ["config.js", "lifecycle.js", "log.js"]
+    },
+    "js/packs.js": {
+      "importedBy": ["main.js", "reproduction.js", "corpse.js"],
+      "imports": ["config.js", "lifecycle.js", "relationships.js", "log.js"]
+    },
+    "js/corpse.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js", "packs.js", "lifecycle.js", "log.js"]
+    },
+    "js/debug.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js"]
+    },
+    "js/log.js": {
+      "importedBy": ["game.js", "main.js", "lifecycle.js", "reproduction.js", "relationships.js", "packs.js", "corpse.js"],
+      "imports": ["config.js"]
+    },
+    "js/billboards.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js"]
+    }
+  }
+}
