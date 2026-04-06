@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bots in a Field - Strategy Builder v11</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- SVG Icon Sprite -->
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-stats" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M4 20V10h4v10H4zm6 0V4h4v16h-4zm6 0V8h4v12h-4z"/>
+    </symbol>
+    <symbol id="icon-strategy" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M13 3l-1.5 3H9l2.5 2-1 3L13 9.5 15.5 11l-1-3L17 6h-2.5L13 3zM7 13l-1 2H4l1.5 1.2-.6 2L7 17l2.1 1.2-.6-2L10 15H8L7 13zm10 0l-1 2h-2l1.5 1.2-.6 2L17 17l2.1 1.2-.6-2L20 15h-2l-1-2z"/>
+    </symbol>
+    <symbol id="icon-lifecycle" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1 .25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+    </symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M19.14 12.94a7.07 7.07 0 000-1.88l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96a7.04 7.04 0 00-1.63-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.48.41l-.36 2.54c-.59.24-1.13.57-1.63.94l-2.39-.96a.49.49 0 00-.59.22L2.74 9.5a.48.48 0 00.12.61l2.03 1.58a7.07 7.07 0 000 1.88l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.3.59.22l2.39-.96c.5.38 1.04.7 1.63.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.63-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.61 3.61 0 0112 15.6z"/>
+    </symbol>
+    <symbol id="icon-speed" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M7 2v11h3v9l7-12h-4l4-8H7z"/>
+    </symbol>
+    <symbol id="icon-attack" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm0 3c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-3.5 7a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm7 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zM12 19c-2.33 0-4.31-1.46-5.11-3.5h10.22c-.8 2.04-2.78 3.5-5.11 3.5z"/>
+    </symbol>
+    <symbol id="icon-defence" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 3.18L18 7.3v3.7c0 4.25-2.95 8.27-6 9.5-3.05-1.23-6-5.25-6-9.5V7.3l6-3.12z"/>
+    </symbol>
+    <symbol id="icon-lives" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+    </symbol>
+    <symbol id="icon-play" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M8 5v14l11-7L8 5z"/>
+    </symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+    </symbol>
+  </svg>
+
+  <div id="setup">
+    <header class="setup-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="22" r="14" fill="#3b82f6" stroke="#60a5fa" stroke-width="2"/>
+            <line x1="14" y1="8" x2="12" y2="2" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+            <line x1="26" y1="8" x2="28" y2="2" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="14" cy="8" r="2" fill="#60a5fa"/>
+            <circle cx="26" cy="8" r="2" fill="#60a5fa"/>
+            <circle cx="15" cy="20" r="3" fill="#fff"/>
+            <circle cx="25" cy="20" r="3" fill="#fff"/>
+            <circle cx="15.5" cy="20.5" r="1.5" fill="#1e293b"/>
+            <circle cx="25.5" cy="20.5" r="1.5" fill="#1e293b"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>BOTS IN A FIELD</h1>
+          <span class="brand-subtitle">Strategy Builder v11</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="reset-defaults-btn" class="btn btn-ghost btn-danger">Reset All</button>
+        <button id="start-btn" class="btn btn-primary">
+          <span class="btn-icon"><svg><use href="#icon-play"/></svg></span>
+          Launch Simulation
+        </button>
+      </div>
+    </header>
+
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="stats">
+        <span class="tab-icon"><svg><use href="#icon-stats"/></svg></span>
+        Stats
+      </button>
+      <button class="tab-btn" data-tab="strategy">
+        <span class="tab-icon"><svg><use href="#icon-strategy"/></svg></span>
+        Strategy
+      </button>
+      <button class="tab-btn" data-tab="lifecycle">
+        <span class="tab-icon"><svg><use href="#icon-lifecycle"/></svg></span>
+        Lifecycle
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <span class="tab-icon"><svg><use href="#icon-settings"/></svg></span>
+        Settings
+      </button>
+    </nav>
+
+    <div class="setup-body">
+      <!-- Stats Tab -->
+      <div id="stats-tab" class="tab-content active">
+        <div class="card">
+          <div class="points-ring">
+            <div class="points-circle">
+              <div class="points-circle-inner">
+                <span class="points-number" id="points-count">0</span>
+                <span class="points-label">left</span>
+              </div>
+            </div>
+            <div class="points-info">
+              <span class="points-title">Stat Points</span>
+              <span class="points-desc">Distribute 18 points across your bot's abilities</span>
+            </div>
+          </div>
+
+          <div class="stats-layout">
+            <div class="stats-column">
+              <div class="stat-row" data-stat="speed">
+                <div class="stat-icon"><svg><use href="#icon-speed"/></svg></div>
+                <div class="stat-info">
+                  <span class="stat-name">Speed</span>
+                  <div class="stat-bar-track"><div class="stat-bar-fill"></div></div>
+                </div>
+                <div class="stat-controls">
+                  <button class="stat-btn minus" data-stat="speed">-</button>
+                  <span class="stat-value" id="speed-value">5</span>
+                  <button class="stat-btn plus" data-stat="speed">+</button>
+                </div>
+              </div>
+              <div class="stat-row" data-stat="attack">
+                <div class="stat-icon"><svg><use href="#icon-attack"/></svg></div>
+                <div class="stat-info">
+                  <span class="stat-name">Attack</span>
+                  <div class="stat-bar-track"><div class="stat-bar-fill"></div></div>
+                </div>
+                <div class="stat-controls">
+                  <button class="stat-btn minus" data-stat="attack">-</button>
+                  <span class="stat-value" id="attack-value">5</span>
+                  <button class="stat-btn plus" data-stat="attack">+</button>
+                </div>
+              </div>
+              <div class="stat-row" data-stat="defence">
+                <div class="stat-icon"><svg><use href="#icon-defence"/></svg></div>
+                <div class="stat-info">
+                  <span class="stat-name">Defence</span>
+                  <div class="stat-bar-track"><div class="stat-bar-fill"></div></div>
+                </div>
+                <div class="stat-controls">
+                  <button class="stat-btn minus" data-stat="defence">-</button>
+                  <span class="stat-value" id="defence-value">5</span>
+                  <button class="stat-btn plus" data-stat="defence">+</button>
+                </div>
+              </div>
+              <div class="stat-row" data-stat="lives">
+                <div class="stat-icon"><svg><use href="#icon-lives"/></svg></div>
+                <div class="stat-info">
+                  <span class="stat-name">Lives</span>
+                  <div class="stat-bar-track"><div class="stat-bar-fill"></div></div>
+                </div>
+                <div class="stat-controls">
+                  <button class="stat-btn minus" data-stat="lives">-</button>
+                  <span class="stat-value" id="lives-value">3</span>
+                  <button class="stat-btn plus" data-stat="lives">+</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="stat-radar-wrap">
+              <canvas id="stat-radar" width="160" height="160"></canvas>
+            </div>
+          </div>
+
+          <div class="preferred-stat-row">
+            <label>Preferred stat for bonus points:</label>
+            <select id="bonus-stat">
+              <option value="speed">Speed</option>
+              <option value="attack">Attack</option>
+              <option value="defence">Defence</option>
+              <option value="lives">Lives</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Strategy Tab -->
+      <div id="strategy-tab" class="tab-content">
+        <div class="mode-tabs">
+          <div class="mode-tab active" data-mode="simple">
+            <div class="mode-badge">Beginner</div>
+            <div class="mode-name">Simple</div>
+            <div class="mode-desc">Blend preset behaviors with weight sliders</div>
+          </div>
+          <div class="mode-tab" data-mode="advanced">
+            <div class="mode-badge">Intermediate</div>
+            <div class="mode-name">Advanced</div>
+            <div class="mode-desc">Build IF-THEN rule lists</div>
+          </div>
+          <div class="mode-tab" data-mode="expert">
+            <div class="mode-badge">Advanced</div>
+            <div class="mode-name">Expert</div>
+            <div class="mode-desc">Visual finite state machine editor</div>
+          </div>
+        </div>
+
+        <!-- Simple Mode -->
+        <div id="simple-mode" class="strategy-mode active">
+          <div class="section">
+            <div class="section-title">Behavior Blend <span class="help-icon" data-tooltip="Enable behaviors and adjust their weights. Higher weight = more likely to be chosen.">?</span></div>
+            <div class="behavior-list" id="behavior-list">
+              <!-- Populated by JS -->
+            </div>
+            <button class="randomize-btn" id="randomize-simple-btn">Randomize Strategy</button>
+          </div>
+        </div>
+
+        <!-- Advanced Mode -->
+        <div id="advanced-mode" class="strategy-mode" style="display:none;">
+          <div class="section">
+            <div class="section-title">Rule List <span class="help-icon" data-tooltip="Rules are evaluated top to bottom. First matching rule wins.">?</span></div>
+            <div class="rule-list" id="rule-list">
+              <!-- Populated by JS -->
+            </div>
+            <div class="add-rule-btn" id="add-rule-btn">+ Add Rule</div>
+          </div>
+        </div>
+
+        <!-- Expert Mode -->
+        <div id="expert-mode" class="strategy-mode" style="display:none;">
+          <div class="section">
+            <div class="section-title">State Machine <span class="help-icon" data-tooltip="Click to add states, drag between states to create transitions.">?</span></div>
+            <div class="state-palette">
+              <div class="palette-item" data-tool="select">Select</div>
+              <div class="palette-item" data-tool="add-state">+ Add State</div>
+              <div class="palette-item" data-tool="add-transition">Add Transition</div>
+              <div class="palette-item" data-tool="delete">Delete</div>
+            </div>
+            <div id="state-canvas-container">
+              <canvas id="state-canvas" width="740" height="350"></canvas>
+            </div>
+            <div class="state-editor-panel" id="state-editor">
+              <h4>Edit State: <span id="edit-state-name">-</span></h4>
+              <div class="editor-row">
+                <label>Name:</label>
+                <input type="text" id="state-name-input" placeholder="State name">
+              </div>
+              <div class="editor-row">
+                <label>Behavior:</label>
+                <select id="state-behavior-select">
+                  <option value="gather">Gather (nearest dot)</option>
+                  <option value="cluster">Cluster Farm</option>
+                  <option value="hunt">Hunt (nearest enemy)</option>
+                  <option value="hunt_weak">Hunt Weak Enemy</option>
+                  <option value="flee">Flee</option>
+                  <option value="gather_safe">Safe Gather</option>
+                </select>
+              </div>
+              <div class="state-actions">
+                <div class="state-action-row">
+                  <label>Entry Action:</label>
+                  <select id="state-entry-action">
+                    <option value="none">None</option>
+                    <option value="log">Log State Change</option>
+                    <option value="boost_speed">Speed Boost</option>
+                    <option value="reset_target">Reset Target</option>
+                  </select>
+                </div>
+                <div class="state-action-row">
+                  <label>Exit Action:</label>
+                  <select id="state-exit-action">
+                    <option value="none">None</option>
+                    <option value="log">Log State Change</option>
+                    <option value="reset_target">Reset Target</option>
+                  </select>
+                </div>
+              </div>
+              <div class="transition-list" id="transition-list">
+                <strong>Transitions:</strong>
+                <!-- Populated by JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lifecycle Tab -->
+      <div id="lifecycle-tab" class="tab-content">
+        <!-- Respawn Invincibility -->
+        <div class="lifecycle-card" data-feature="invincibility">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-invincibility-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Respawn Invincibility</h3>
+              <p class="lifecycle-summary">Newly respawned bots are untouchable for a period</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Duration (frames)</label>
+                <input type="number" id="lc-invincibility-duration" value="180" min="0" max="600">
+              </div>
+              <div class="setting-row">
+                <label>Can Deal Damage While Invincible</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-invincibility-can-damage">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Break on Combat Initiation</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-invincibility-break">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Visual Effect</label>
+                <select id="lc-invincibility-effect">
+                  <option value="pulse">Pulse</option>
+                  <option value="glow">Glow</option>
+                  <option value="flash">Flash</option>
+                </select>
+              </div>
+              <p class="lifecycle-hint">180 frames = 3 seconds at 60fps</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Starvation -->
+        <div class="lifecycle-card" data-feature="starvation">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-starvation-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Starvation</h3>
+              <p class="lifecycle-summary">Bots lose lives if they don't eat or fight</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Inactivity Threshold (frames)</label>
+                <input type="number" id="lc-starvation-threshold" value="600" min="60" max="3600">
+              </div>
+              <div class="setting-row">
+                <label>Damage Per Tick</label>
+                <input type="number" id="lc-starvation-damage" value="0.5" min="0.1" max="5" step="0.1">
+              </div>
+              <div class="setting-row">
+                <label>Tick Interval (frames)</label>
+                <input type="number" id="lc-starvation-interval" value="60" min="10" max="300">
+              </div>
+              <div class="setting-row">
+                <label>Reset on Dot Eaten</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-starvation-reset-dot">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Reset on Damage Dealt</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-starvation-reset-damage">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Reset on Kill</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-starvation-reset-kill">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Enable Stat Decay</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-starvation-stat-decay">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <p class="lifecycle-hint">600 frames = 10 seconds at 60fps</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Age + Corpses -->
+        <div class="lifecycle-card" data-feature="age">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-age-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Age + Corpses</h3>
+              <p class="lifecycle-summary">Bots age over time and die naturally</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Max Age (frames)</label>
+                <input type="number" id="lc-age-max" value="36000" min="600" max="72000">
+              </div>
+              <div class="setting-row">
+                <label>Visual Decay Start (%)</label>
+                <input type="range" id="lc-age-visual-start" min="50" max="100" value="80">
+                <span id="lc-age-visual-value">80%</span>
+              </div>
+              <div class="setting-row">
+                <label>Death Behavior</label>
+                <select id="lc-age-death-behavior">
+                  <option value="corpse">Become Corpse</option>
+                  <option value="respawn">Respawn</option>
+                  <option value="remove">Remove</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <label>Corpse Nutrition</label>
+                <input type="number" id="lc-corpse-nutrition" value="2" min="0.1" max="10" step="0.1">
+              </div>
+              <div class="setting-row">
+                <label>Corpse Duration (frames, 0=permanent)</label>
+                <input type="number" id="lc-corpse-duration" value="600" min="0" max="3600">
+              </div>
+              <p class="lifecycle-hint">36000 frames = 10 minutes at 60fps</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Asexual Reproduction -->
+        <div class="lifecycle-card" data-feature="asexual">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-asexual-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Asexual Reproduction</h3>
+              <p class="lifecycle-summary">Mature bots spawn offspring automatically</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Maturity Threshold (frames)</label>
+                <input type="number" id="lc-asexual-maturity" value="1800" min="300" max="18000">
+              </div>
+              <div class="setting-row">
+                <label>Parent Life Cost (%)</label>
+                <input type="range" id="lc-asexual-life-cost" min="10" max="90" value="50">
+                <span id="lc-asexual-cost-value">50%</span>
+              </div>
+              <div class="setting-row">
+                <label>Stat Noise (%)</label>
+                <input type="range" id="lc-asexual-noise" min="0" max="50" value="10">
+                <span id="lc-asexual-noise-value">10%</span>
+              </div>
+              <div class="setting-row">
+                <label>Cooldown (frames)</label>
+                <input type="number" id="lc-asexual-cooldown" value="900" min="60" max="3600">
+              </div>
+              <p class="lifecycle-hint">1800 frames = 30 seconds maturity at 60fps</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sexual Reproduction -->
+        <div class="lifecycle-card" data-feature="sexual">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-sexual-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Sexual Reproduction</h3>
+              <p class="lifecycle-summary">Two compatible bots in proximity produce offspring</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Proximity Distance</label>
+                <input type="number" id="lc-sexual-distance" value="60" min="20" max="200">
+              </div>
+              <div class="setting-row">
+                <label>Proximity Duration (frames)</label>
+                <input type="number" id="lc-sexual-duration" value="180" min="30" max="600">
+              </div>
+              <div class="setting-row">
+                <label>Compatibility Threshold</label>
+                <input type="range" id="lc-sexual-compat" min="0" max="100" value="50">
+                <span id="lc-sexual-compat-value">0.5</span>
+              </div>
+              <div class="setting-row">
+                <label>Cooldown (frames)</label>
+                <input type="number" id="lc-sexual-cooldown" value="1200" min="60" max="3600">
+              </div>
+              <div class="setting-row">
+                <label>Pack Mating Bonus</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-sexual-pack-bonus">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pack Formation -->
+        <div class="lifecycle-card" data-feature="packs">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-packs-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Pack Formation</h3>
+              <p class="lifecycle-summary">Bots with similar strategies form cooperative packs</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Similarity Threshold</label>
+                <input type="range" id="lc-packs-similarity" min="30" max="100" value="70">
+                <span id="lc-packs-similarity-value">0.7</span>
+              </div>
+              <div class="setting-row">
+                <label>Proximity Distance</label>
+                <input type="number" id="lc-packs-distance" value="100" min="30" max="300">
+              </div>
+              <div class="setting-row">
+                <label>Max Pack Size (0=unlimited)</label>
+                <input type="number" id="lc-packs-max-size" value="5" min="0" max="20">
+              </div>
+              <div class="setting-row">
+                <label>Disband on Respawn</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-packs-disband-respawn">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Disband on Starvation</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-packs-disband-starve">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Territory + Cannibalism -->
+        <div class="lifecycle-card" data-feature="territory">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-territory-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Territory + Cannibalism</h3>
+              <p class="lifecycle-summary">Packs claim territory; starving members may cannibalize</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Territory Radius</label>
+                <input type="number" id="lc-territory-radius" value="300" min="100" max="600">
+              </div>
+              <div class="setting-row">
+                <label>Enable Cannibalism</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-cannibalism-enabled">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Cannibalism Trigger</label>
+                <select id="lc-cannibalism-trigger">
+                  <option value="starving">Starving</option>
+                  <option value="lowLives">Low Lives</option>
+                  <option value="always">Always</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <label>Target Preference</label>
+                <select id="lc-cannibalism-target">
+                  <option value="weakest">Weakest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="nearest">Nearest</option>
+                  <option value="random">Random</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Player Overrides -->
+        <div class="lifecycle-card" data-feature="player-overrides">
+          <div class="lifecycle-header">
+            <label class="toggle-switch" onclick="event.stopPropagation()">
+              <input type="checkbox" id="lc-player-overrides">
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="lifecycle-info">
+              <h3 class="lifecycle-title">Player Overrides</h3>
+              <p class="lifecycle-summary">Override lifecycle settings for your bot</p>
+            </div>
+            <span class="status-badge off">Disabled</span>
+            <div class="lifecycle-chevron"><svg><use href="#icon-chevron"/></svg></div>
+          </div>
+          <div class="lifecycle-body">
+            <div class="lifecycle-body-inner">
+              <div class="setting-row">
+                <label>Player Immune to Starvation</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-player-immune-starve">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Player Immune to Aging</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-player-immune-age">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Player Can Reproduce</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="lc-player-reproduce">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div id="settings-tab" class="tab-content">
+        <div class="settings-grid">
+          <div class="section">
+            <div class="section-title">Global AI Settings</div>
+            <div class="settings-section">
+              <div class="setting-row">
+                <label>Re-evaluation Rate (frames)</label>
+                <input type="number" id="reeval-rate" value="30" min="1" max="120">
+              </div>
+              <div class="setting-row">
+                <label>Behavior Switch Cooldown</label>
+                <input type="number" id="switch-cooldown" value="15" min="0" max="60">
+              </div>
+              <div class="setting-row">
+                <label>Randomness Noise (0-1)</label>
+                <input type="range" id="randomness-noise" min="0" max="100" value="10">
+                <span id="noise-value">0.1</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Emergency Override</div>
+            <div class="settings-section">
+              <div class="setting-row">
+                <label>Enable Emergency Override</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="emergency-enabled">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Lives Threshold</label>
+                <input type="number" id="emergency-threshold" value="2" min="1" max="10">
+              </div>
+              <div class="setting-row">
+                <label>Emergency Behavior</label>
+                <select id="emergency-behavior">
+                  <option value="flee">Flee</option>
+                  <option value="gather_safe">Gather Safe</option>
+                  <option value="wander">Wander</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">NPC Bot Settings</div>
+            <div class="settings-section">
+              <div class="setting-row">
+                <label>Random Stats Distribution</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="npc-random-stats">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <p class="lifecycle-hint">NPCs spawn with random stat distribution (18 total points, min 1 speed/defence/lives, 0 attack)</p>
+
+              <div class="setting-row">
+                <label>Death Penalty (instead of reset)</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="npc-death-penalty">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <p class="lifecycle-hint">On death, NPCs lose 1 point per stat instead of full reset. Lives always reset.</p>
+
+              <div class="setting-row">
+                <label>Evolution from Killer</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="npc-evolution">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row" style="margin-left:20px;">
+                <label>Inherit Ratio (0-1)</label>
+                <input type="range" id="npc-evolution-ratio" min="0" max="100" value="50">
+                <span id="evolution-ratio-value">0.5</span>
+              </div>
+              <p class="lifecycle-hint">Dead NPC's base stats become average of their old stats and killer's stats. Enables emergent evolution.</p>
+
+              <div class="setting-row">
+                <label>Random NPC Strategies</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="npc-random-strategy">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <p class="lifecycle-hint">NPCs use random behavior strategies (Gatherer, Hunter, Survivor, Opportunist, Aggressive)</p>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Import / Export Configuration</div>
+            <div class="io-buttons">
+              <button class="io-btn export" id="export-btn">Export Config</button>
+              <button class="io-btn import" id="import-btn">Import Config</button>
+              <input type="file" id="import-file" accept=".json">
+            </div>
+            <p class="lifecycle-hint">Save and load your strategy configurations as JSON files.</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Simulation Logging</div>
+            <div class="settings-section">
+              <div class="setting-row">
+                <label>Max Decisions (0 = unlimited)</label>
+                <input type="number" id="max-decisions" value="100" min="0" max="10000">
+              </div>
+              <div class="setting-row">
+                <label>Enable Logging</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="logging-enabled">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Log All Bots</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="log-all-bots">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Pause on Complete</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="pause-on-complete">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+            <p class="lifecycle-hint">Log bot decisions for algorithm verification. Machine-parseable format.</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Billboards</div>
+            <div class="settings-section">
+              <div class="setting-row">
+                <label>Enable Billboards</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="billboard-enabled" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <label>Max Billboards</label>
+                <input type="number" id="billboard-max" value="5" min="1" max="20">
+              </div>
+              <div class="setting-row">
+                <label>Spawn Chance (per frame)</label>
+                <input type="range" id="billboard-spawn-chance" min="1" max="20" value="2">
+                <span id="billboard-spawn-value">0.002</span>
+              </div>
+              <div class="setting-row">
+                <label>Min Duration (frames)</label>
+                <input type="number" id="billboard-min-duration" value="300" min="60" max="1800">
+              </div>
+              <div class="setting-row">
+                <label>Max Duration (frames)</label>
+                <input type="number" id="billboard-max-duration" value="900" min="60" max="3600">
+              </div>
+              <div class="setting-row">
+                <label>Cluster Proximity Radius</label>
+                <input type="number" id="billboard-proximity" value="200" min="50" max="500">
+              </div>
+              <div class="setting-row">
+                <label>Min Cluster Size</label>
+                <input type="number" id="billboard-min-cluster" value="2" min="1" max="10">
+              </div>
+              <div class="setting-row">
+                <label>Board Width</label>
+                <input type="number" id="billboard-width" value="120" min="60" max="200">
+              </div>
+              <div class="setting-row">
+                <label>Board Height</label>
+                <input type="number" id="billboard-height" value="60" min="30" max="100">
+              </div>
+              <div class="setting-row">
+                <label>Pole Height</label>
+                <input type="number" id="billboard-pole-height" value="40" min="20" max="80">
+              </div>
+            </div>
+            <p class="lifecycle-hint">Advertisement billboards spawn near dot clusters. 300 frames = 5 seconds.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="field"></canvas>
+
+  <!-- Debug Panel -->
+  <div id="debug-panel">
+    <div class="debug-header">AI Debug Panel [D]</div>
+    <div class="debug-toggles">
+      <label class="debug-toggle">
+        <input type="checkbox" id="show-target-line" checked>
+        Target Line
+      </label>
+      <label class="debug-toggle">
+        <input type="checkbox" id="show-context" checked>
+        Context Values
+      </label>
+    </div>
+    <div class="debug-section">
+      <div class="debug-section-title">Current State</div>
+      <div id="debug-state"></div>
+    </div>
+    <div class="debug-section">
+      <div class="debug-section-title">Last Decision</div>
+      <div id="debug-decision"></div>
+    </div>
+    <div class="debug-section" id="debug-context-section">
+      <div class="debug-section-title">Context Values</div>
+      <div class="context-panel" id="debug-context"></div>
+    </div>
+  </div>
+
+  <div id="ui">
+    <div class="hud-header">
+      <span class="hud-bot-label" id="hud-bot-name">Bot #1</span>
+      <span class="hud-bot-tag player" id="hud-bot-tag">PLAYER</span>
+    </div>
+    <div class="hud-stats">
+      <div class="hud-stat" data-stat="speed">
+        <span class="hud-stat-icon"><svg><use href="#icon-speed"/></svg></span>
+        <span class="hud-stat-label">SPD</span>
+        <div class="hud-stat-bar"><div class="hud-stat-bar-fill" id="hud-bar-speed"></div></div>
+        <span class="hud-stat-value" id="hud-speed">5.0</span>
+      </div>
+      <div class="hud-stat" data-stat="attack">
+        <span class="hud-stat-icon"><svg><use href="#icon-attack"/></svg></span>
+        <span class="hud-stat-label">ATK</span>
+        <div class="hud-stat-bar"><div class="hud-stat-bar-fill" id="hud-bar-attack"></div></div>
+        <span class="hud-stat-value" id="hud-attack">5.0</span>
+      </div>
+      <div class="hud-stat" data-stat="defence">
+        <span class="hud-stat-icon"><svg><use href="#icon-defence"/></svg></span>
+        <span class="hud-stat-label">DEF</span>
+        <div class="hud-stat-bar"><div class="hud-stat-bar-fill" id="hud-bar-defence"></div></div>
+        <span class="hud-stat-value" id="hud-defence">5.0</span>
+      </div>
+      <div class="hud-stat" data-stat="lives">
+        <span class="hud-stat-icon"><svg><use href="#icon-lives"/></svg></span>
+        <span class="hud-stat-label">HP</span>
+        <div class="hud-stat-bar"><div class="hud-stat-bar-fill" id="hud-bar-lives"></div></div>
+        <span class="hud-stat-value" id="hud-lives">3.0</span>
+      </div>
+    </div>
+    <div class="hud-extra">
+      <span id="hud-position">X: 0 Y: 0</span>
+      <span id="hud-kills">Kills: 0</span>
+      <span id="hud-action">Action: idle</span>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="key-hint"><kbd>TAB</kbd> Switch bot</div>
+    <div class="key-hint"><kbd>SPACE</kbd> Auto-follow</div>
+    <div class="key-hint"><kbd>D</kbd> Debug</div>
+    <div class="key-hint"><kbd>L</kbd> Log</div>
+  </div>
+
+  <!-- Simulation Controls -->
+  <div id="sim-controls">
+    <span id="sim-status">Frame: 0 | Decisions: 0/100</span>
+    <div class="speed-controls">
+      <span class="speed-label">Speed:</span>
+      <button class="speed-btn active" data-speed="1">x1</button>
+      <button class="speed-btn" data-speed="1.5">x1.5</button>
+      <button class="speed-btn" data-speed="2">x2</button>
+    </div>
+    <button id="pause-btn">Pause</button>
+    <button id="resume-btn">Resume</button>
+    <button id="show-log-btn">Show Log</button>
+    <button id="stop-sim-btn">Stop & Reconfigure</button>
+    <button id="copy-strongest-btn">Copy Strongest Bot</button>
+  </div>
+  <div id="strongest-bot-display"></div>
+
+  <!-- Log Panel -->
+  <div id="log-panel">
+    <div class="log-header">
+      <span>Simulation Log</span>
+      <button id="close-log-btn">&times;</button>
+    </div>
+    <div class="log-info">
+      <span id="log-decision-count">Decisions logged: 0</span>
+      <button id="copy-log-btn">Copy to Clipboard</button>
+      <button id="download-log-btn">Download Log</button>
+    </div>
+    <textarea id="log-output" readonly placeholder="Log output will appear here when simulation pauses or completes..."></textarea>
+  </div>
+
+  <!-- Event Feed -->
+  <div id="event-feed"></div>
+
+  <!-- JavaScript modules -->
+  <script src="js/config.js"></script>
+  <script src="js/log.js"></script>
+  <script src="js/billboards.js"></script>
+  <script src="js/corpse.js"></script>
+  <script src="js/relationships.js"></script>
+  <script src="js/packs.js"></script>
+  <script src="js/lifecycle.js"></script>
+  <script src="js/reproduction.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/bot-ai.js"></script>
+  <script src="js/bot-render.js"></script>
+  <script src="js/ui-strategy.js"></script>
+  <script src="js/ui-lifecycle.js"></script>
+  <script src="js/ui-settings.js"></script>
+  <script src="js/ui-notifications.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/debug.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
