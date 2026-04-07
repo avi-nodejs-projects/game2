@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Terrarium — Bots in a Field 3D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a1a; overflow: hidden; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  canvas { display: block; }
+
+  /* Setup screen */
+  #setup-screen {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #2a2a2a 0%, #0d0d0d 100%);
+    z-index: 100;
+    transition: opacity 0.6s ease;
+  }
+  #setup-screen.hidden { opacity: 0; pointer-events: none; }
+
+  .setup-card {
+    text-align: center;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 60px 80px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .setup-card h1 {
+    font-size: 42px;
+    font-weight: 300;
+    color: #e8e0d4;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .setup-card p {
+    font-size: 14px;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 50px;
+  }
+  .start-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #e8e0d4;
+    font-size: 15px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    padding: 16px 48px;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+  .start-btn:hover {
+    background: rgba(255,255,255,0.15);
+    border-color: rgba(255,255,255,0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: none;
+    justify-content: center;
+    padding: 12px 20px;
+    z-index: 50;
+  }
+  #hud.visible { display: flex; }
+  #hud-inner {
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px 24px;
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    letter-spacing: 1px;
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  #hud-inner .label { color: rgba(255,255,255,0.4); font-size: 11px; }
+  #hud-inner .value { font-weight: 600; }
+  #hud-inner .star { color: #ffd700; margin-right: 4px; }
+  #hud-inner .divider { width: 1px; height: 16px; background: rgba(255,255,255,0.15); }
+
+  /* Bot info tooltip */
+  #bot-info {
+    position: fixed;
+    display: none;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: rgba(255,255,255,0.9);
+    font-size: 12px;
+    z-index: 60;
+    pointer-events: none;
+    line-height: 1.6;
+  }
+
+  /* Controls hint */
+  #controls-hint {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: none;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 8px 20px;
+    color: rgba(255,255,255,0.35);
+    font-size: 11px;
+    letter-spacing: 1px;
+    z-index: 50;
+  }
+  #controls-hint.visible { display: block; }
+</style>
+</head>
+<body>
+
+<!-- Setup Screen -->
+<div id="setup-screen">
+  <div class="setup-card">
+    <h1>The Terrarium</h1>
+    <p>Bots in a Field &mdash; 3D</p>
+    <button class="start-btn" id="start-btn">Start Simulation</button>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="hud-inner">
+    <span><span class="star">&#9733;</span><span id="hud-name">Player Bot</span></span>
+    <span class="divider"></span>
+    <span><span class="label">SPD </span><span class="value" id="hud-spd">5.0</span></span>
+    <span><span class="label">ATK </span><span class="value" id="hud-atk">5.0</span></span>
+    <span><span class="label">DEF </span><span class="value" id="hud-def">5.0</span></span>
+    <span><span class="label">LIV </span><span class="value" id="hud-liv">3.0</span></span>
+    <span class="divider"></span>
+    <span><span class="label">Kills: </span><span class="value" id="hud-kills">0</span></span>
+    <span class="divider"></span>
+    <span><span class="label">&#9201; </span><span class="value" id="hud-time">0:00</span></span>
+  </div>
+</div>
+
+<!-- Bot info tooltip -->
+<div id="bot-info"></div>
+
+<!-- Controls hint -->
+<div id="controls-hint">
+  DRAG: orbit &nbsp;&bull;&nbsp; SCROLL: zoom &nbsp;&bull;&nbsp; TAB: cycle bot &nbsp;&bull;&nbsp; SPACE: pause &nbsp;&bull;&nbsp; CLICK: select bot
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<!-- Game Engine (inline) -->
+<script>
+// Shared Game Engine for 3D Map Concepts
+// Extracted from v11 — pure game logic, no rendering dependencies
+
+const WORLD_WIDTH = 2000;
+const WORLD_HEIGHT = 2000;
+const BOT_COUNT = 20;
+const DOT_COUNT = 50;
+const STARTING_STATS = { speed: 5, attack: 5, defence: 5, lives: 3 };
+const TOTAL_POINTS = 18;
+
+class YellowDot {
+  constructor() {
+    this.size = 6;
+    this.respawn();
+  }
+  respawn() {
+    const m = 50;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+  }
+}
+
+class Bot {
+  constructor(index, isPlayer = false) {
+    this.index = index;
+    this.isPlayer = isPlayer;
+    this.size = 10 + Math.random() * 6;
+    this.hue = isPlayer ? 200 : Math.random() * 360;
+    this.color = `hsl(${this.hue}, 70%, 50%)`;
+    this.colorHex = this._hslToHex(this.hue, 70, 50);
+    this.killCount = 0;
+    this.combatCooldown = 0;
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.angle = 0;
+    this.lifetime = 0;
+    this.justTookDamage = false;
+    this.justDealtDamage = false;
+    this.damageTimer = 0;
+    this.damageDealtTimer = 0;
+    this.lastAttacker = null;
+
+    this.speed = isPlayer ? STARTING_STATS.speed : STARTING_STATS.speed;
+    this.attack = isPlayer ? STARTING_STATS.attack : STARTING_STATS.attack;
+    this.defence = isPlayer ? STARTING_STATS.defence : STARTING_STATS.defence;
+    this.lives = isPlayer ? STARTING_STATS.lives : STARTING_STATS.lives;
+    this.initialLives = this.lives;
+
+    this.spawnAtRandom();
+  }
+
+  _hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); };
+    return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8) | Math.round(f(4) * 255);
+  }
+
+  get totalStats() { return this.speed + this.attack + this.defence + this.lives; }
+
+  spawnAtRandom() {
+    const m = 100;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.combatCooldown = 0;
+  }
+
+  resetStats() {
+    this.speed = STARTING_STATS.speed;
+    this.attack = STARTING_STATS.attack;
+    this.defence = STARTING_STATS.defence;
+    this.lives = STARTING_STATS.lives;
+    this.initialLives = this.lives;
+  }
+
+  addRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat]++;
+    if (stat === 'lives') this.initialLives++;
+  }
+
+  addPartialRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat] += 0.1;
+    if (stat === 'lives') this.initialLives += 0.1;
+  }
+
+  distanceTo(other) {
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  findNearestDot(dots) {
+    let nearest = null, minDist = Infinity;
+    for (const dot of dots) {
+      const d = this.distanceTo(dot);
+      if (d < minDist) { minDist = d; nearest = dot; }
+    }
+    return { dot: nearest, dist: minDist };
+  }
+
+  findNearestBot(bots) {
+    let nearest = null, minDist = Infinity;
+    for (const bot of bots) {
+      if (bot === this) continue;
+      const d = this.distanceTo(bot);
+      if (d < minDist) { minDist = d; nearest = bot; }
+    }
+    return { bot: nearest, dist: minDist };
+  }
+
+  pickNewTarget(bots, dots) {
+    const dotChance = 1 - (this.lives / (this.lives + 3));
+    if (Math.random() < dotChance) {
+      const { dot } = this.findNearestDot(dots);
+      if (dot) { this.targetX = dot.x; this.targetY = dot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    } else {
+      const { bot } = this.findNearestBot(bots);
+      if (bot) { this.targetX = bot.x; this.targetY = bot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    }
+    const m = 100;
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.maxIdle = 60 + Math.random() * 180;
+    this.idleTime = 0;
+  }
+
+  update(bots, dots) {
+    this.lifetime++;
+    if (this.combatCooldown > 0) this.combatCooldown--;
+    if (this.damageTimer > 0) { this.damageTimer--; if (this.damageTimer === 0) { this.justTookDamage = false; this.lastAttacker = null; } }
+    if (this.damageDealtTimer > 0) { this.damageDealtTimer--; if (this.damageDealtTimer === 0) this.justDealtDamage = false; }
+
+    // Re-evaluate target periodically
+    if (this.combatCooldown === 0 && this.lifetime % 30 === 0) {
+      this.pickNewTarget(bots, dots);
+    }
+
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 5) {
+      this.idleTime++;
+      if (this.idleTime > this.maxIdle) this.pickNewTarget(bots, dots);
+    } else {
+      const moveSpeed = 0.5 + this.speed * 0.2;
+      this.x += (dx / dist) * moveSpeed;
+      this.y += (dy / dist) * moveSpeed;
+      this.angle = Math.atan2(dy, dx);
+    }
+
+    this.x = Math.max(20, Math.min(WORLD_WIDTH - 20, this.x));
+    this.y = Math.max(20, Math.min(WORLD_HEIGHT - 20, this.y));
+  }
+}
+
+class GameEngine {
+  constructor(options = {}) {
+    this.botCount = options.botCount || BOT_COUNT;
+    this.dotCount = options.dotCount || DOT_COUNT;
+    this.bots = [];
+    this.dots = [];
+    this.frameCount = 0;
+    this.paused = false;
+    this.events = [];
+    this.playerBot = null;
+    this.followedBot = null;
+    this.followIndex = 0;
+  }
+
+  init() {
+    this.dots = [];
+    for (let i = 0; i < this.dotCount; i++) this.dots.push(new YellowDot());
+
+    this.bots = [];
+    for (let i = 0; i < this.botCount; i++) {
+      const bot = new Bot(i, i === 0);
+      this.bots.push(bot);
+    }
+    this.playerBot = this.bots[0];
+    this.followedBot = this.playerBot;
+    this.followIndex = 0;
+    this.frameCount = 0;
+  }
+
+  cycleFollowedBot() {
+    this.followIndex = (this.followIndex + 1) % this.bots.length;
+    this.followedBot = this.bots[this.followIndex];
+  }
+
+  update() {
+    if (this.paused) return;
+    this.events = [];
+    this.frameCount++;
+
+    for (const bot of this.bots) bot.update(this.bots, this.dots);
+    this._processCollisions();
+  }
+
+  _processCollisions() {
+    // Bot-Dot
+    for (const bot of this.bots) {
+      for (const dot of this.dots) {
+        const dx = bot.x - dot.x, dy = bot.y - dot.y;
+        if (Math.sqrt(dx * dx + dy * dy) < bot.size + dot.size) {
+          bot.addPartialRandomStat();
+          const oldPos = { x: dot.x, y: dot.y };
+          dot.respawn();
+          this.events.push({ type: 'eat', bot, dotPos: oldPos });
+        }
+      }
+    }
+
+    // Bot-Bot
+    for (let i = 0; i < this.bots.length; i++) {
+      for (let j = i + 1; j < this.bots.length; j++) {
+        const b1 = this.bots[i], b2 = this.bots[j];
+        const dx = b1.x - b2.x, dy = b1.y - b2.y;
+        if (Math.sqrt(dx * dx + dy * dy) < b1.size + b2.size) {
+          this._handleCombat(b1, b2);
+        }
+      }
+    }
+  }
+
+  _handleCombat(bot1, bot2) {
+    if (bot1.combatCooldown > 0 || bot2.combatCooldown > 0) return;
+
+    let damage1 = bot2.attack - bot1.defence;
+    let damage2 = bot1.attack - bot2.defence;
+
+    if (damage1 <= 0 && damage2 <= 0) {
+      damage1 = bot2.attack / Math.max(bot1.defence, 0.1);
+      damage2 = bot1.attack / Math.max(bot2.defence, 0.1);
+    } else {
+      damage1 = Math.max(0, damage1);
+      damage2 = Math.max(0, damage2);
+    }
+
+    bot1.lives -= damage1;
+    bot2.lives -= damage2;
+
+    if (damage1 > 0) { bot1.justTookDamage = true; bot1.damageTimer = 120; bot1.lastAttacker = bot2; }
+    if (damage2 > 0) { bot2.justTookDamage = true; bot2.damageTimer = 120; bot2.lastAttacker = bot1; }
+    if (damage2 > 0) { bot1.justDealtDamage = true; bot1.damageDealtTimer = 120; }
+    if (damage1 > 0) { bot2.justDealtDamage = true; bot2.damageDealtTimer = 120; }
+
+    bot1.combatCooldown = 60;
+    bot2.combatCooldown = 60;
+
+    this.events.push({ type: 'combat', bot1, bot2, damage1, damage2 });
+
+    const b1Dead = bot1.lives <= 0;
+    const b2Dead = bot2.lives <= 0;
+
+    if (b1Dead && b2Dead) {
+      this._handleDeath(bot1, null);
+      this._handleDeath(bot2, null);
+    } else if (b1Dead) {
+      bot2.killCount++;
+      this._handleDeath(bot1, bot2);
+      bot2.addRandomStat();
+    } else if (b2Dead) {
+      bot1.killCount++;
+      this._handleDeath(bot2, bot1);
+      bot1.addRandomStat();
+    }
+  }
+
+  _handleDeath(bot, killer) {
+    this.events.push({ type: 'death', bot, killer, x: bot.x, y: bot.y });
+    bot.resetStats();
+    bot.spawnAtRandom();
+    this.events.push({ type: 'spawn', bot });
+  }
+}
+</script>
+
+<!-- Three.js Scene -->
+<script>
+(function() {
+  'use strict';
+
+  // ─── Constants ───────────────────────────────────────────────────────
+  const TERRARIUM_SIZE = 80;
+  const HALF = TERRARIUM_SIZE / 2;
+  const WALL_HEIGHT = 22;
+  const BASE_HEIGHT = 2.5;
+  const HEIGHTMAP_RES = 128;
+  const TERRAIN_MAX_HEIGHT = TERRARIUM_SIZE * 0.03;
+  const GLASS_THICKNESS = 0.3;
+
+  // ─── Simplex-like noise (value noise with smooth interpolation) ────
+  const noiseGrid = [];
+  const NOISE_SIZE = 32;
+  for (let i = 0; i <= NOISE_SIZE; i++) {
+    noiseGrid[i] = [];
+    for (let j = 0; j <= NOISE_SIZE; j++) {
+      noiseGrid[i][j] = Math.random();
+    }
+  }
+
+  function smoothNoise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const sx = xf * xf * (3 - 2 * xf);
+    const sy = yf * yf * (3 - 2 * yf);
+    const i0 = xi & (NOISE_SIZE - 1), i1 = (xi + 1) & (NOISE_SIZE - 1);
+    const j0 = yi & (NOISE_SIZE - 1), j1 = (yi + 1) & (NOISE_SIZE - 1);
+    const n00 = noiseGrid[i0][j0], n10 = noiseGrid[i1][j0];
+    const n01 = noiseGrid[i0][j1], n11 = noiseGrid[i1][j1];
+    const nx0 = n00 + sx * (n10 - n00);
+    const nx1 = n01 + sx * (n11 - n01);
+    return nx0 + sy * (nx1 - nx0);
+  }
+
+  function terrainNoise(x, y) {
+    // Multi-octave noise for gentle rolling hills
+    let val = 0;
+    val += smoothNoise(x * 3, y * 3) * 0.5;
+    val += smoothNoise(x * 6, y * 6) * 0.3;
+    val += smoothNoise(x * 12, y * 12) * 0.15;
+    val += smoothNoise(x * 24, y * 24) * 0.05;
+    return val;
+  }
+
+  // Build heightmap data so we can query terrain height
+  const heightmapData = new Float32Array((HEIGHTMAP_RES + 1) * (HEIGHTMAP_RES + 1));
+  for (let iy = 0; iy <= HEIGHTMAP_RES; iy++) {
+    for (let ix = 0; ix <= HEIGHTMAP_RES; ix++) {
+      const nx = ix / HEIGHTMAP_RES;
+      const ny = iy / HEIGHTMAP_RES;
+      // Fade edges to 0 for clean border
+      const ex = Math.min(nx, 1 - nx) * 4;
+      const ey = Math.min(ny, 1 - ny) * 4;
+      const edge = Math.min(1, Math.min(ex, ey));
+      heightmapData[iy * (HEIGHTMAP_RES + 1) + ix] = terrainNoise(nx, ny) * TERRAIN_MAX_HEIGHT * edge;
+    }
+  }
+
+  function getTerrainHeight(sceneX, sceneZ) {
+    const nx = (sceneX + HALF) / TERRARIUM_SIZE;
+    const ny = (sceneZ + HALF) / TERRARIUM_SIZE;
+    const fx = Math.max(0, Math.min(1, nx)) * HEIGHTMAP_RES;
+    const fy = Math.max(0, Math.min(1, ny)) * HEIGHTMAP_RES;
+    const ix = Math.floor(fx), iy = Math.floor(fy);
+    const tx = fx - ix, ty = fy - iy;
+    const ix1 = Math.min(ix + 1, HEIGHTMAP_RES);
+    const iy1 = Math.min(iy + 1, HEIGHTMAP_RES);
+    const h00 = heightmapData[iy * (HEIGHTMAP_RES + 1) + ix];
+    const h10 = heightmapData[iy * (HEIGHTMAP_RES + 1) + ix1];
+    const h01 = heightmapData[iy1 * (HEIGHTMAP_RES + 1) + ix];
+    const h11 = heightmapData[iy1 * (HEIGHTMAP_RES + 1) + ix1];
+    return (h00 * (1 - tx) * (1 - ty) + h10 * tx * (1 - ty) + h01 * (1 - tx) * ty + h11 * tx * ty);
+  }
+
+  function worldToScene(wx, wy) {
+    return {
+      x: (wx / WORLD_WIDTH - 0.5) * TERRARIUM_SIZE,
+      z: (wy / WORLD_HEIGHT - 0.5) * TERRARIUM_SIZE
+    };
+  }
+
+  // ─── Three.js Setup ─────────────────────────────────────────────────
+  let renderer, scene, camera, controls;
+  let engine;
+  let botMeshes = [];
+  let dotMeshes = [];
+  let particles = [];
+  let startTime;
+  let selectedBot = null;
+  let running = false;
+
+  function initThree() {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+    scene.fog = new THREE.FogExp2(0x1a1a2e, 0.004);
+
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+    camera.position.set(0, 70, 45);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enablePan = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minPolarAngle = THREE.MathUtils.degToRad(15);
+    controls.maxPolarAngle = THREE.MathUtils.degToRad(45);
+    controls.minAzimuthAngle = THREE.MathUtils.degToRad(-40);
+    controls.maxAzimuthAngle = THREE.MathUtils.degToRad(40);
+    controls.minDistance = 40;
+    controls.maxDistance = 120;
+    controls.target.set(0, 6, 0);
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  }
+
+  // ─── Build Scene ─────────────────────────────────────────────────────
+
+  function buildScene() {
+    // Ambient light
+    const ambient = new THREE.AmbientLight(0x8090b0, 0.4);
+    scene.add(ambient);
+
+    // Hemisphere light for natural fill
+    const hemi = new THREE.HemisphereLight(0xb0c4de, 0x3a5f3a, 0.3);
+    scene.add(hemi);
+
+    // Desk lamp (spot light)
+    const spotLight = new THREE.SpotLight(0xffe8c0, 1.8, 200, Math.PI / 5, 0.5, 1);
+    spotLight.position.set(-50, 70, 40);
+    spotLight.target.position.set(0, 0, 0);
+    spotLight.castShadow = true;
+    spotLight.shadow.mapSize.width = 2048;
+    spotLight.shadow.mapSize.height = 2048;
+    spotLight.shadow.camera.near = 10;
+    spotLight.shadow.camera.far = 200;
+    spotLight.shadow.bias = -0.001;
+    spotLight.shadow.radius = 3;
+    scene.add(spotLight);
+    scene.add(spotLight.target);
+
+    // Secondary fill light from opposite side
+    const fillLight = new THREE.DirectionalLight(0xc0d0e8, 0.3);
+    fillLight.position.set(40, 40, -30);
+    scene.add(fillLight);
+
+    // Build desk lamp geometry (decorative)
+    buildDeskLamp(spotLight.position);
+
+    // Desk surface
+    buildDesk();
+
+    // Wooden base
+    buildBase();
+
+    // Terrain
+    buildTerrain();
+
+    // Terrain details (grass, rocks)
+    buildTerrainDetails();
+
+    // Glass panels
+    buildGlass();
+  }
+
+  function buildDeskLamp(pos) {
+    const lampGroup = new THREE.Group();
+
+    // Lamp arm
+    const armGeo = new THREE.CylinderGeometry(0.4, 0.4, 30, 8);
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.8, roughness: 0.3 });
+    const arm = new THREE.Mesh(armGeo, armMat);
+    arm.position.set(pos.x, pos.y - 15, pos.z);
+    arm.rotation.z = 0.3;
+    arm.rotation.x = -0.2;
+    lampGroup.add(arm);
+
+    // Lamp shade (cone)
+    const shadeGeo = new THREE.ConeGeometry(6, 8, 16, 1, true);
+    const shadeMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a, metalness: 0.6, roughness: 0.4, side: THREE.DoubleSide
+    });
+    const shade = new THREE.Mesh(shadeGeo, shadeMat);
+    shade.position.copy(pos);
+    shade.position.y -= 2;
+    lampGroup.add(shade);
+
+    // Lamp bulb glow
+    const bulbGeo = new THREE.SphereGeometry(1.5, 12, 8);
+    const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff0d0 });
+    const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+    bulb.position.copy(pos);
+    bulb.position.y -= 4;
+    lampGroup.add(bulb);
+
+    // Base plate
+    const baseGeo = new THREE.CylinderGeometry(5, 6, 1.5, 16);
+    const base = new THREE.Mesh(baseGeo, armMat);
+    base.position.set(pos.x - 4, -14, pos.z + 4);
+    lampGroup.add(base);
+
+    scene.add(lampGroup);
+  }
+
+  function buildDesk() {
+    const deskGeo = new THREE.PlaneGeometry(250, 180);
+    const deskMat = new THREE.MeshStandardMaterial({
+      color: 0x3b2516,
+      roughness: 0.7,
+      metalness: 0.05,
+    });
+    const desk = new THREE.Mesh(deskGeo, deskMat);
+    desk.rotation.x = -Math.PI / 2;
+    desk.position.y = -14.5;
+    desk.receiveShadow = true;
+    scene.add(desk);
+
+    // Subtle wood grain lines using a second plane
+    const grainGeo = new THREE.PlaneGeometry(250, 180);
+    const grainMat = new THREE.MeshStandardMaterial({
+      color: 0x2e1c0e,
+      roughness: 0.8,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.15,
+    });
+    const grain = new THREE.Mesh(grainGeo, grainMat);
+    grain.rotation.x = -Math.PI / 2;
+    grain.position.y = -14.49;
+    scene.add(grain);
+  }
+
+  function buildBase() {
+    const baseW = TERRARIUM_SIZE + 6;
+    const baseD = TERRARIUM_SIZE + 6;
+    const baseGeo = new THREE.BoxGeometry(baseW, BASE_HEIGHT, baseD);
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x5c3a1e,
+      roughness: 0.65,
+      metalness: 0.05,
+    });
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.y = -14.5 + BASE_HEIGHT / 2;
+    base.castShadow = true;
+    base.receiveShadow = true;
+    scene.add(base);
+
+    // Trim / lip around top of base
+    const trimGeo = new THREE.BoxGeometry(baseW + 1.2, 0.6, baseD + 1.2);
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x4a2e14, roughness: 0.5, metalness: 0.1 });
+    const trim = new THREE.Mesh(trimGeo, trimMat);
+    trim.position.y = -14.5 + BASE_HEIGHT + 0.3;
+    scene.add(trim);
+  }
+
+  function buildTerrain() {
+    const geo = new THREE.PlaneGeometry(TERRARIUM_SIZE, TERRARIUM_SIZE, HEIGHTMAP_RES, HEIGHTMAP_RES);
+    geo.rotateX(-Math.PI / 2);
+    const posAttr = geo.attributes.position;
+    const colors = new Float32Array(posAttr.count * 3);
+
+    for (let i = 0; i < posAttr.count; i++) {
+      const x = posAttr.getX(i);
+      const z = posAttr.getZ(i);
+      const h = getTerrainHeight(x, z);
+      posAttr.setY(i, h);
+
+      // Vertex color variation for grass
+      const g = 0.35 + 0.25 * (h / TERRAIN_MAX_HEIGHT) + (Math.random() * 0.08 - 0.04);
+      colors[i * 3] = 0.2 + Math.random() * 0.05;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = 0.12 + Math.random() * 0.04;
+    }
+
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.9,
+      metalness: 0.0,
+    });
+
+    const terrain = new THREE.Mesh(geo, mat);
+    terrain.position.y = -14.5 + BASE_HEIGHT;
+    terrain.receiveShadow = true;
+    scene.add(terrain);
+  }
+
+  function buildTerrainDetails() {
+    const baseY = -14.5 + BASE_HEIGHT;
+
+    // Grass tufts - instanced cones
+    const grassGeo = new THREE.ConeGeometry(0.2, 1.0, 4);
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x3a7a2a, roughness: 0.85 });
+    const grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, 200);
+    const dummy = new THREE.Object3D();
+
+    for (let i = 0; i < 200; i++) {
+      const sx = (Math.random() - 0.5) * (TERRARIUM_SIZE - 4);
+      const sz = (Math.random() - 0.5) * (TERRARIUM_SIZE - 4);
+      const h = getTerrainHeight(sx, sz);
+      dummy.position.set(sx, baseY + h + 0.4, sz);
+      dummy.rotation.set(Math.random() * 0.3 - 0.15, Math.random() * Math.PI * 2, Math.random() * 0.3 - 0.15);
+      const s = 0.6 + Math.random() * 0.8;
+      dummy.scale.set(s, s + Math.random() * 0.5, s);
+      dummy.updateMatrix();
+      grassMesh.setMatrixAt(i, dummy.matrix);
+
+      // Vary green shade per instance
+      const col = new THREE.Color();
+      col.setHSL(0.28 + Math.random() * 0.06, 0.5 + Math.random() * 0.2, 0.25 + Math.random() * 0.15);
+      grassMesh.setColorAt(i, col);
+    }
+    grassMesh.instanceMatrix.needsUpdate = true;
+    grassMesh.instanceColor.needsUpdate = true;
+    scene.add(grassMesh);
+
+    // Rocks - instanced dodecahedrons
+    const rockGeo = new THREE.DodecahedronGeometry(0.5, 0);
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7a, roughness: 0.85, metalness: 0.1 });
+    const rockMesh = new THREE.InstancedMesh(rockGeo, rockMat, 30);
+
+    for (let i = 0; i < 30; i++) {
+      const sx = (Math.random() - 0.5) * (TERRARIUM_SIZE - 6);
+      const sz = (Math.random() - 0.5) * (TERRARIUM_SIZE - 6);
+      const h = getTerrainHeight(sx, sz);
+      dummy.position.set(sx, baseY + h + 0.15, sz);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      const s = 0.4 + Math.random() * 0.9;
+      dummy.scale.set(s * (0.8 + Math.random() * 0.4), s * (0.5 + Math.random() * 0.3), s * (0.8 + Math.random() * 0.4));
+      dummy.updateMatrix();
+      rockMesh.setMatrixAt(i, dummy.matrix);
+
+      const col = new THREE.Color();
+      col.setHSL(0.08, 0.05 + Math.random() * 0.1, 0.35 + Math.random() * 0.2);
+      rockMesh.setColorAt(i, col);
+    }
+    rockMesh.instanceMatrix.needsUpdate = true;
+    rockMesh.instanceColor.needsUpdate = true;
+    scene.add(rockMesh);
+  }
+
+  function buildGlass() {
+    const glassMat = new THREE.MeshPhysicalMaterial({
+      color: 0xd0e8ff,
+      transparent: true,
+      opacity: 0.12,
+      roughness: 0.05,
+      metalness: 0.0,
+      transmission: 0.9,
+      thickness: 0.5,
+      side: THREE.DoubleSide,
+      envMapIntensity: 1.5,
+    });
+
+    const edgeMat = new THREE.MeshBasicMaterial({
+      color: 0x88bbee,
+      transparent: true,
+      opacity: 0.15,
+    });
+
+    const baseY = -14.5 + BASE_HEIGHT;
+    const panelW = TERRARIUM_SIZE + 1;
+    const panelH = WALL_HEIGHT;
+
+    // Front
+    const frontGeo = new THREE.PlaneGeometry(panelW, panelH);
+    const front = new THREE.Mesh(frontGeo, glassMat);
+    front.position.set(0, baseY + panelH / 2, HALF + 0.5);
+    scene.add(front);
+
+    // Back
+    const back = new THREE.Mesh(frontGeo, glassMat);
+    back.position.set(0, baseY + panelH / 2, -HALF - 0.5);
+    back.rotation.y = Math.PI;
+    scene.add(back);
+
+    // Left
+    const sideGeo = new THREE.PlaneGeometry(panelW, panelH);
+    const left = new THREE.Mesh(sideGeo, glassMat);
+    left.position.set(-HALF - 0.5, baseY + panelH / 2, 0);
+    left.rotation.y = Math.PI / 2;
+    scene.add(left);
+
+    // Right
+    const right = new THREE.Mesh(sideGeo, glassMat);
+    right.position.set(HALF + 0.5, baseY + panelH / 2, 0);
+    right.rotation.y = -Math.PI / 2;
+    scene.add(right);
+
+    // Lid (top)
+    const lidGeo = new THREE.PlaneGeometry(panelW, panelW);
+    const lid = new THREE.Mesh(lidGeo, glassMat);
+    lid.position.set(0, baseY + panelH, 0);
+    lid.rotation.x = -Math.PI / 2;
+    scene.add(lid);
+
+    // Glass edge highlights (wireframe borders)
+    const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(panelW, panelH, panelW));
+    const edgeLines = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({
+      color: 0x88bbee, transparent: true, opacity: 0.25
+    }));
+    edgeLines.position.set(0, baseY + panelH / 2, 0);
+    scene.add(edgeLines);
+  }
+
+  // ─── Bot Meshes ──────────────────────────────────────────────────────
+
+  function createBotMesh(bot) {
+    const group = new THREE.Group();
+    group.userData.bot = bot;
+
+    // Body: pill shape via scaled sphere + cylinder
+    const bodyColor = new THREE.Color(bot.colorHex);
+
+    // Main body cylinder
+    const cylGeo = new THREE.CylinderGeometry(1, 1, 1.6, 12);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      roughness: 0.4,
+      metalness: 0.15,
+    });
+    const cyl = new THREE.Mesh(cylGeo, bodyMat);
+    group.add(cyl);
+
+    // Top hemisphere
+    const topCapGeo = new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    const topCap = new THREE.Mesh(topCapGeo, bodyMat);
+    topCap.position.y = 0.8;
+    group.add(topCap);
+
+    // Bottom hemisphere
+    const botCapGeo = new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    const botCap = new THREE.Mesh(botCapGeo, bodyMat);
+    botCap.position.y = -0.8;
+    group.add(botCap);
+
+    // Eyes container (will be rotated to face target)
+    const eyesGroup = new THREE.Group();
+    eyesGroup.position.y = 0.5;
+
+    const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1 });
+
+    // Left eye
+    const leftEyeGroup = new THREE.Group();
+    const leftWhite = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), eyeWhiteMat);
+    leftWhite.position.z = 0.85;
+    leftEyeGroup.add(leftWhite);
+    const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), pupilMat);
+    leftPupil.position.z = 1.15;
+    leftEyeGroup.add(leftPupil);
+    leftEyeGroup.position.x = -0.38;
+    eyesGroup.add(leftEyeGroup);
+
+    // Right eye
+    const rightEyeGroup = new THREE.Group();
+    const rightWhite = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), eyeWhiteMat);
+    rightWhite.position.z = 0.85;
+    rightEyeGroup.add(rightWhite);
+    const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), pupilMat);
+    rightPupil.position.z = 1.15;
+    rightEyeGroup.add(rightPupil);
+    rightEyeGroup.position.x = 0.38;
+    eyesGroup.add(rightEyeGroup);
+
+    group.add(eyesGroup);
+
+    // Store references
+    group.userData.bodyMat = bodyMat;
+    group.userData.eyesGroup = eyesGroup;
+    group.userData.leftPupil = leftPupil;
+    group.userData.rightPupil = rightPupil;
+    group.userData.originalColor = bodyColor.clone();
+
+    group.castShadow = true;
+
+    // Enable shadow on body parts
+    cyl.castShadow = true;
+    topCap.castShadow = true;
+    botCap.castShadow = true;
+
+    return group;
+  }
+
+  // ─── Dot (Food) Meshes ───────────────────────────────────────────────
+
+  function createDotMesh() {
+    const geo = new THREE.SphereGeometry(0.6, 10, 8);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffcc00,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.6,
+      roughness: 0.3,
+      metalness: 0.2,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+
+    // Outer glow sphere
+    const glowGeo = new THREE.SphereGeometry(1.0, 8, 6);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xffdd44,
+      transparent: true,
+      opacity: 0.15,
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    mesh.add(glow);
+
+    mesh.userData.mat = mat;
+    mesh.userData.glowMat = glowMat;
+
+    return mesh;
+  }
+
+  // ─── Particles ───────────────────────────────────────────────────────
+
+  function spawnParticles(x, y, z, color, count, speed, life) {
+    for (let i = 0; i < count; i++) {
+      const geo = new THREE.SphereGeometry(0.15 + Math.random() * 0.15, 6, 4);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y, z);
+      scene.add(mesh);
+      particles.push({
+        mesh,
+        vx: (Math.random() - 0.5) * speed,
+        vy: Math.random() * speed * 1.5 + speed * 0.5,
+        vz: (Math.random() - 0.5) * speed,
+        life: life + Math.random() * life * 0.5,
+        maxLife: life + Math.random() * life * 0.5,
+      });
+    }
+  }
+
+  function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.mesh.position.x += p.vx;
+      p.mesh.position.y += p.vy;
+      p.mesh.position.z += p.vz;
+      p.vy -= 0.008; // gravity
+      p.life--;
+      p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
+      if (p.life <= 0) {
+        scene.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        p.mesh.material.dispose();
+        particles.splice(i, 1);
+      }
+    }
+  }
+
+  // ─── HUD ─────────────────────────────────────────────────────────────
+
+  function updateHUD() {
+    const bot = engine.followedBot;
+    if (!bot) return;
+
+    const name = bot.isPlayer ? 'Player Bot' : `Bot ${bot.index}`;
+    document.getElementById('hud-name').textContent = name;
+    document.getElementById('hud-spd').textContent = bot.speed.toFixed(1);
+    document.getElementById('hud-atk').textContent = bot.attack.toFixed(1);
+    document.getElementById('hud-def').textContent = bot.defence.toFixed(1);
+    document.getElementById('hud-liv').textContent = bot.lives.toFixed(1);
+    document.getElementById('hud-kills').textContent = bot.killCount;
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const m = Math.floor(elapsed / 60);
+    const s = elapsed % 60;
+    document.getElementById('hud-time').textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // ─── Raycasting (click to select bot) ────────────────────────────────
+
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+
+  function onMouseClick(event) {
+    if (!running) return;
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+
+    // Check intersection against bot groups
+    for (let i = 0; i < botMeshes.length; i++) {
+      const group = botMeshes[i];
+      const intersects = raycaster.intersectObjects(group.children, true);
+      if (intersects.length > 0) {
+        const bot = group.userData.bot;
+        engine.followedBot = bot;
+        engine.followIndex = bot.index;
+        selectedBot = bot;
+
+        // Show bot info
+        showBotInfo(bot, event.clientX, event.clientY);
+        return;
+      }
+    }
+
+    // Clicked nothing - hide info
+    document.getElementById('bot-info').style.display = 'none';
+    selectedBot = null;
+  }
+
+  function showBotInfo(bot, px, py) {
+    const info = document.getElementById('bot-info');
+    const name = bot.isPlayer ? 'Player Bot' : `Bot ${bot.index}`;
+    info.innerHTML = `<strong>${name}</strong><br>` +
+      `SPD: ${bot.speed.toFixed(1)} | ATK: ${bot.attack.toFixed(1)}<br>` +
+      `DEF: ${bot.defence.toFixed(1)} | LIV: ${bot.lives.toFixed(1)}<br>` +
+      `Kills: ${bot.killCount} | Total: ${bot.totalStats.toFixed(1)}`;
+    info.style.display = 'block';
+    info.style.left = (px + 15) + 'px';
+    info.style.top = (py - 10) + 'px';
+
+    // Auto-hide after 3 seconds
+    setTimeout(() => { info.style.display = 'none'; }, 3000);
+  }
+
+  // ─── Keyboard Controls ──────────────────────────────────────────────
+
+  function onKeyDown(event) {
+    if (!running) return;
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      engine.cycleFollowedBot();
+    } else if (event.key === ' ') {
+      event.preventDefault();
+      engine.paused = !engine.paused;
+    }
+  }
+
+  // ─── Initialize Everything ──────────────────────────────────────────
+
+  function initGame() {
+    engine = new GameEngine();
+    engine.init();
+    startTime = Date.now();
+
+    const baseY = -14.5 + BASE_HEIGHT;
+
+    // Create bot meshes
+    for (const bot of engine.bots) {
+      const mesh = createBotMesh(bot);
+      const pos = worldToScene(bot.x, bot.y);
+      const h = getTerrainHeight(pos.x, pos.z);
+      mesh.position.set(pos.x, baseY + h + 1.5, pos.z);
+      scene.add(mesh);
+      botMeshes.push(mesh);
+    }
+
+    // Create dot meshes
+    for (const dot of engine.dots) {
+      const mesh = createDotMesh();
+      const pos = worldToScene(dot.x, dot.y);
+      const h = getTerrainHeight(pos.x, pos.z);
+      mesh.position.set(pos.x, baseY + h + 0.6, pos.z);
+      scene.add(mesh);
+      dotMeshes.push(mesh);
+    }
+  }
+
+  // ─── Animation Loop ──────────────────────────────────────────────────
+
+  let frameCount = 0;
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (!running) return;
+
+    frameCount++;
+    engine.update();
+    controls.update();
+
+    const baseY = -14.5 + BASE_HEIGHT;
+    const time = performance.now() * 0.001;
+
+    // Update bot meshes
+    for (let i = 0; i < engine.bots.length; i++) {
+      const bot = engine.bots[i];
+      const group = botMeshes[i];
+      const pos = worldToScene(bot.x, bot.y);
+      const h = getTerrainHeight(pos.x, pos.z);
+
+      // Size based on totalStats
+      const baseRadius = 2.5 + bot.totalStats * 0.08;
+      const s = baseRadius / 3.5;
+      group.scale.set(s, s, s);
+
+      // Position with bobbing
+      const bob = Math.sin(time * 3 + i * 1.7) * 0.3;
+      group.position.x += (pos.x - group.position.x) * 0.15;
+      group.position.z += (pos.z - group.position.z) * 0.15;
+      group.position.y = baseY + h + 1.5 * s + bob;
+
+      // Face movement direction (angle: atan2(dy,dx) → rotate around Y)
+      // game angle is atan2(dy,dx), three.js Z-forward so rotation.y = -angle + PI/2
+      const targetRotY = -bot.angle + Math.PI / 2;
+      // Smooth rotation
+      let deltaRot = targetRotY - group.rotation.y;
+      while (deltaRot > Math.PI) deltaRot -= Math.PI * 2;
+      while (deltaRot < -Math.PI) deltaRot += Math.PI * 2;
+      group.rotation.y += deltaRot * 0.1;
+
+      // Tilt forward when moving
+      const dx = bot.targetX - bot.x;
+      const dy = bot.targetY - bot.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const tilt = dist > 5 ? 0.15 : 0;
+      group.rotation.x += (tilt - group.rotation.x) * 0.1;
+
+      // Pupil tracking (look toward target direction)
+      const eyesGroup = group.userData.eyesGroup;
+      const leftPupil = group.userData.leftPupil;
+      const rightPupil = group.userData.rightPupil;
+      // Shift pupils slightly in the target direction (in local space)
+      const lookX = Math.sin(bot.angle) * 0.08;
+      const lookY = 0;
+      leftPupil.position.x = lookX;
+      leftPupil.position.y = lookY;
+      rightPupil.position.x = lookX;
+      rightPupil.position.y = lookY;
+
+      // Damage flash
+      const bodyMat = group.userData.bodyMat;
+      if (bot.justTookDamage && bot.damageTimer > 100) {
+        bodyMat.emissive.setHex(0xff4444);
+        bodyMat.emissiveIntensity = 0.5;
+      } else {
+        bodyMat.emissive.setHex(0x000000);
+        bodyMat.emissiveIntensity = 0;
+      }
+    }
+
+    // Update dot meshes
+    for (let i = 0; i < engine.dots.length; i++) {
+      const dot = engine.dots[i];
+      const mesh = dotMeshes[i];
+      const pos = worldToScene(dot.x, dot.y);
+      const h = getTerrainHeight(pos.x, pos.z);
+
+      mesh.position.set(pos.x, baseY + h + 0.6, pos.z);
+
+      // Pulse animation
+      const pulse = 0.4 + Math.sin(time * 4 + i * 2.1) * 0.3;
+      mesh.userData.mat.emissiveIntensity = pulse;
+      mesh.userData.glowMat.opacity = 0.08 + pulse * 0.12;
+    }
+
+    // Process events for visual effects
+    for (const evt of engine.events) {
+      if (evt.type === 'eat') {
+        const pos = worldToScene(evt.dotPos.x, evt.dotPos.y);
+        const h = getTerrainHeight(pos.x, pos.z);
+        spawnParticles(pos.x, baseY + h + 1, pos.z, 0xffdd00, 5, 0.12, 30);
+      } else if (evt.type === 'combat') {
+        const mx = (evt.bot1.x + evt.bot2.x) / 2;
+        const my = (evt.bot1.y + evt.bot2.y) / 2;
+        const pos = worldToScene(mx, my);
+        const h = getTerrainHeight(pos.x, pos.z);
+        spawnParticles(pos.x, baseY + h + 2, pos.z, 0xff6644, 8, 0.18, 25);
+      } else if (evt.type === 'death') {
+        const pos = worldToScene(evt.x, evt.y);
+        const h = getTerrainHeight(pos.x, pos.z);
+        spawnParticles(pos.x, baseY + h + 2, pos.z, 0xffffff, 12, 0.25, 40);
+      }
+    }
+
+    updateParticles();
+    updateHUD();
+
+    renderer.render(scene, camera);
+  }
+
+  // ─── Start Button ────────────────────────────────────────────────────
+
+  document.getElementById('start-btn').addEventListener('click', () => {
+    const screen = document.getElementById('setup-screen');
+    screen.classList.add('hidden');
+    document.getElementById('hud').classList.add('visible');
+    document.getElementById('controls-hint').classList.add('visible');
+
+    setTimeout(() => { screen.style.display = 'none'; }, 700);
+
+    running = true;
+  });
+
+  // ─── Boot ────────────────────────────────────────────────────────────
+
+  initThree();
+  buildScene();
+  initGame();
+  animate();
+
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('click', onMouseClick);
+
+})();
+</script>
+</body>
+</html>

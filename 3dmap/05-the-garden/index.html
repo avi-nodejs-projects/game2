@@ -1,0 +1,1676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Garden - Bots in a Field 3D</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; font-family: 'Georgia', serif; }
+canvas { display: block; }
+
+/* Setup Screen */
+#setup-screen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #3a6e2a 0%, #5a9a3a 50%, #4a8c3a 100%);
+  z-index: 100;
+  transition: opacity 0.8s ease;
+}
+#setup-card {
+  background: rgba(255,255,255,0.92);
+  border-radius: 20px;
+  padding: 60px 80px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+#setup-card h1 {
+  font-size: 48px;
+  color: #2a5a1a;
+  margin-bottom: 8px;
+  font-weight: normal;
+  letter-spacing: 2px;
+}
+#setup-card .subtitle {
+  font-size: 16px;
+  color: #6a8a5a;
+  margin-bottom: 40px;
+  font-style: italic;
+}
+#enter-btn {
+  background: #4a8c3a;
+  color: white;
+  border: none;
+  padding: 16px 48px;
+  font-size: 20px;
+  font-family: 'Georgia', serif;
+  border-radius: 30px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  letter-spacing: 1px;
+}
+#enter-btn:hover {
+  background: #3a7a2a;
+  transform: scale(1.05);
+  box-shadow: 0 8px 25px rgba(58,122,42,0.4);
+}
+
+/* HUD */
+#hud {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-size: 15px;
+  font-family: 'Georgia', serif;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.9);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  white-space: nowrap;
+  z-index: 10;
+}
+#hud.visible { opacity: 1; }
+
+/* Pause overlay */
+#pause-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 36px;
+  font-family: 'Georgia', serif;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.8);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 10;
+  letter-spacing: 4px;
+}
+#pause-overlay.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="setup-screen">
+  <div id="setup-card">
+    <h1>The Garden</h1>
+    <div class="subtitle">Bots in a Field &mdash; 3D</div>
+    <button id="enter-btn">Enter Garden</button>
+  </div>
+</div>
+
+<div id="hud"></div>
+<div id="pause-overlay">PAUSED</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<!-- Game Engine (inline) -->
+<script>
+// Shared Game Engine for 3D Map Concepts
+// Extracted from v11 — pure game logic, no rendering dependencies
+
+const WORLD_WIDTH = 2000;
+const WORLD_HEIGHT = 2000;
+const BOT_COUNT = 20;
+const DOT_COUNT = 50;
+const STARTING_STATS = { speed: 5, attack: 5, defence: 5, lives: 3 };
+const TOTAL_POINTS = 18;
+
+class YellowDot {
+  constructor() {
+    this.size = 6;
+    this.respawn();
+  }
+  respawn() {
+    const m = 50;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+  }
+}
+
+class Bot {
+  constructor(index, isPlayer = false) {
+    this.index = index;
+    this.isPlayer = isPlayer;
+    this.size = 10 + Math.random() * 6;
+    this.hue = isPlayer ? 200 : Math.random() * 360;
+    this.color = `hsl(${this.hue}, 70%, 50%)`;
+    this.colorHex = this._hslToHex(this.hue, 70, 50);
+    this.killCount = 0;
+    this.combatCooldown = 0;
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.angle = 0;
+    this.lifetime = 0;
+    this.justTookDamage = false;
+    this.justDealtDamage = false;
+    this.damageTimer = 0;
+    this.damageDealtTimer = 0;
+    this.lastAttacker = null;
+
+    this.speed = isPlayer ? STARTING_STATS.speed : STARTING_STATS.speed;
+    this.attack = isPlayer ? STARTING_STATS.attack : STARTING_STATS.attack;
+    this.defence = isPlayer ? STARTING_STATS.defence : STARTING_STATS.defence;
+    this.lives = isPlayer ? STARTING_STATS.lives : STARTING_STATS.lives;
+    this.initialLives = this.lives;
+
+    this.spawnAtRandom();
+  }
+
+  _hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); };
+    return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8) | Math.round(f(4) * 255);
+  }
+
+  get totalStats() { return this.speed + this.attack + this.defence + this.lives; }
+
+  spawnAtRandom() {
+    const m = 100;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.combatCooldown = 0;
+  }
+
+  resetStats() {
+    this.speed = STARTING_STATS.speed;
+    this.attack = STARTING_STATS.attack;
+    this.defence = STARTING_STATS.defence;
+    this.lives = STARTING_STATS.lives;
+    this.initialLives = this.lives;
+  }
+
+  addRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat]++;
+    if (stat === 'lives') this.initialLives++;
+  }
+
+  addPartialRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat] += 0.1;
+    if (stat === 'lives') this.initialLives += 0.1;
+  }
+
+  distanceTo(other) {
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  findNearestDot(dots) {
+    let nearest = null, minDist = Infinity;
+    for (const dot of dots) {
+      const d = this.distanceTo(dot);
+      if (d < minDist) { minDist = d; nearest = dot; }
+    }
+    return { dot: nearest, dist: minDist };
+  }
+
+  findNearestBot(bots) {
+    let nearest = null, minDist = Infinity;
+    for (const bot of bots) {
+      if (bot === this) continue;
+      const d = this.distanceTo(bot);
+      if (d < minDist) { minDist = d; nearest = bot; }
+    }
+    return { bot: nearest, dist: minDist };
+  }
+
+  pickNewTarget(bots, dots) {
+    const dotChance = 1 - (this.lives / (this.lives + 3));
+    if (Math.random() < dotChance) {
+      const { dot } = this.findNearestDot(dots);
+      if (dot) { this.targetX = dot.x; this.targetY = dot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    } else {
+      const { bot } = this.findNearestBot(bots);
+      if (bot) { this.targetX = bot.x; this.targetY = bot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    }
+    const m = 100;
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.maxIdle = 60 + Math.random() * 180;
+    this.idleTime = 0;
+  }
+
+  update(bots, dots) {
+    this.lifetime++;
+    if (this.combatCooldown > 0) this.combatCooldown--;
+    if (this.damageTimer > 0) { this.damageTimer--; if (this.damageTimer === 0) { this.justTookDamage = false; this.lastAttacker = null; } }
+    if (this.damageDealtTimer > 0) { this.damageDealtTimer--; if (this.damageDealtTimer === 0) this.justDealtDamage = false; }
+
+    // Re-evaluate target periodically
+    if (this.combatCooldown === 0 && this.lifetime % 30 === 0) {
+      this.pickNewTarget(bots, dots);
+    }
+
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 5) {
+      this.idleTime++;
+      if (this.idleTime > this.maxIdle) this.pickNewTarget(bots, dots);
+    } else {
+      const moveSpeed = 0.5 + this.speed * 0.2;
+      this.x += (dx / dist) * moveSpeed;
+      this.y += (dy / dist) * moveSpeed;
+      this.angle = Math.atan2(dy, dx);
+    }
+
+    this.x = Math.max(20, Math.min(WORLD_WIDTH - 20, this.x));
+    this.y = Math.max(20, Math.min(WORLD_HEIGHT - 20, this.y));
+  }
+}
+
+class GameEngine {
+  constructor(options = {}) {
+    this.botCount = options.botCount || BOT_COUNT;
+    this.dotCount = options.dotCount || DOT_COUNT;
+    this.bots = [];
+    this.dots = [];
+    this.frameCount = 0;
+    this.paused = false;
+    this.events = [];
+    this.playerBot = null;
+    this.followedBot = null;
+    this.followIndex = 0;
+  }
+
+  init() {
+    this.dots = [];
+    for (let i = 0; i < this.dotCount; i++) this.dots.push(new YellowDot());
+
+    this.bots = [];
+    for (let i = 0; i < this.botCount; i++) {
+      const bot = new Bot(i, i === 0);
+      this.bots.push(bot);
+    }
+    this.playerBot = this.bots[0];
+    this.followedBot = this.playerBot;
+    this.followIndex = 0;
+    this.frameCount = 0;
+  }
+
+  cycleFollowedBot() {
+    this.followIndex = (this.followIndex + 1) % this.bots.length;
+    this.followedBot = this.bots[this.followIndex];
+  }
+
+  update() {
+    if (this.paused) return;
+    this.events = [];
+    this.frameCount++;
+
+    for (const bot of this.bots) bot.update(this.bots, this.dots);
+    this._processCollisions();
+  }
+
+  _processCollisions() {
+    for (const bot of this.bots) {
+      for (const dot of this.dots) {
+        const dx = bot.x - dot.x, dy = bot.y - dot.y;
+        if (Math.sqrt(dx * dx + dy * dy) < bot.size + dot.size) {
+          bot.addPartialRandomStat();
+          const oldPos = { x: dot.x, y: dot.y };
+          dot.respawn();
+          this.events.push({ type: 'eat', bot, dotPos: oldPos });
+        }
+      }
+    }
+
+    for (let i = 0; i < this.bots.length; i++) {
+      for (let j = i + 1; j < this.bots.length; j++) {
+        const b1 = this.bots[i], b2 = this.bots[j];
+        const dx = b1.x - b2.x, dy = b1.y - b2.y;
+        if (Math.sqrt(dx * dx + dy * dy) < b1.size + b2.size) {
+          this._handleCombat(b1, b2);
+        }
+      }
+    }
+  }
+
+  _handleCombat(bot1, bot2) {
+    if (bot1.combatCooldown > 0 || bot2.combatCooldown > 0) return;
+
+    let damage1 = bot2.attack - bot1.defence;
+    let damage2 = bot1.attack - bot2.defence;
+
+    if (damage1 <= 0 && damage2 <= 0) {
+      damage1 = bot2.attack / Math.max(bot1.defence, 0.1);
+      damage2 = bot1.attack / Math.max(bot2.defence, 0.1);
+    } else {
+      damage1 = Math.max(0, damage1);
+      damage2 = Math.max(0, damage2);
+    }
+
+    bot1.lives -= damage1;
+    bot2.lives -= damage2;
+
+    if (damage1 > 0) { bot1.justTookDamage = true; bot1.damageTimer = 120; bot1.lastAttacker = bot2; }
+    if (damage2 > 0) { bot2.justTookDamage = true; bot2.damageTimer = 120; bot2.lastAttacker = bot1; }
+    if (damage2 > 0) { bot1.justDealtDamage = true; bot1.damageDealtTimer = 120; }
+    if (damage1 > 0) { bot2.justDealtDamage = true; bot2.damageDealtTimer = 120; }
+
+    bot1.combatCooldown = 60;
+    bot2.combatCooldown = 60;
+
+    this.events.push({ type: 'combat', bot1, bot2, damage1, damage2 });
+
+    const b1Dead = bot1.lives <= 0;
+    const b2Dead = bot2.lives <= 0;
+
+    if (b1Dead && b2Dead) {
+      this._handleDeath(bot1, null);
+      this._handleDeath(bot2, null);
+    } else if (b1Dead) {
+      bot2.killCount++;
+      this._handleDeath(bot1, bot2);
+      bot2.addRandomStat();
+    } else if (b2Dead) {
+      bot1.killCount++;
+      this._handleDeath(bot2, bot1);
+      bot1.addRandomStat();
+    }
+  }
+
+  _handleDeath(bot, killer) {
+    this.events.push({ type: 'death', bot, killer, x: bot.x, y: bot.y });
+    bot.resetStats();
+    bot.spawnAtRandom();
+    this.events.push({ type: 'spawn', bot });
+  }
+}
+</script>
+
+<!-- Garden 3D Scene -->
+<script>
+(function() {
+  'use strict';
+
+  // ===== Constants =====
+  const GARDEN_SIZE = 90;
+  const DAY_CYCLE_FRAMES = 18000; // 5 minutes at 60fps
+  const TREE_COUNT = 14;
+  const GRASS_COUNT = 2000;
+  const ROCK_COUNT = 25;
+  const FIREFLY_COUNT = 50;
+
+  // ===== State =====
+  let scene, camera, renderer, controls;
+  let engine;
+  let creatureGroups = []; // Three.js groups for each bot
+  let flowerGroups = [];   // Three.js groups for each food dot
+  let deathGardens = [];   // memorial flowers at death sites
+  let combatParticles = []; // active dirt particles
+  let deathAnims = [];      // active death animations
+  let terrainMesh;
+  let sunLight, moonLight, ambientLight;
+  let firefliesPoints, fireflyData = [];
+  let skyCanvas, skyTexture;
+  let waterMesh;
+  let grassInstanced;
+  let gameStarted = false;
+
+  // Camera director state
+  let directorEnabled = true;
+  let directorMode = 'follow'; // 'follow', 'closeup', 'establishing'
+  let directorTimer = 0;
+  let directorTarget = null;
+  let noEventTimer = 0;
+  let userInteracting = false;
+  let userInteractTimer = 0;
+  let cameraTargetPos = new THREE.Vector3();
+  let cameraTargetLook = new THREE.Vector3();
+  let cameraCurrentLook = new THREE.Vector3();
+
+  // HUD state
+  let hudEl, pauseEl;
+  let hudVisible = false;
+  let hudTimer = 0;
+  let lastHudStats = '';
+
+  // Timing
+  let startTime = 0;
+
+  // ===== Coordinate Mapping =====
+  function fieldToGarden(fieldX, fieldY) {
+    return {
+      x: (fieldX / WORLD_WIDTH - 0.5) * GARDEN_SIZE * 2,
+      z: (fieldY / WORLD_HEIGHT - 0.5) * GARDEN_SIZE * 2
+    };
+  }
+
+  // ===== Terrain Height =====
+  function getTerrainHeight(x, z) {
+    let h = 0;
+    h += Math.sin(x * 0.06) * Math.cos(z * 0.08) * 3;
+    h += Math.sin(x * 0.12 + 1.5) * Math.cos(z * 0.1 + 0.5) * 1.5;
+    h += Math.sin(x * 0.2) * Math.sin(z * 0.18) * 0.7;
+    // Pond depression
+    const pondX = 25, pondZ = -18, pondRadius = 15;
+    const pondDist = Math.sqrt((x - pondX) ** 2 + (z - pondZ) ** 2);
+    if (pondDist < pondRadius) {
+      h -= (1 - pondDist / pondRadius) * 2.5;
+    }
+    return Math.max(-1.5, h);
+  }
+
+  // ===== Sky Gradient =====
+  function createSkyTexture(topR, topG, topB, botR, botG, botB) {
+    if (!skyCanvas) {
+      skyCanvas = document.createElement('canvas');
+      skyCanvas.width = 2;
+      skyCanvas.height = 256;
+    }
+    const ctx = skyCanvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, `rgb(${topR},${topG},${topB})`);
+    grad.addColorStop(1, `rgb(${botR},${botG},${botB})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 256);
+    if (!skyTexture) {
+      skyTexture = new THREE.CanvasTexture(skyCanvas);
+    } else {
+      skyTexture.needsUpdate = true;
+    }
+    return skyTexture;
+  }
+
+  function lerpVal(a, b, t) { return a + (b - a) * t; }
+
+  // ===== Setup Scene =====
+  function initScene() {
+    scene = new THREE.Scene();
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    document.body.appendChild(renderer.domElement);
+
+    // Camera
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.5, 500);
+    camera.position.set(0, 30, 50);
+
+    // Controls
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.maxPolarAngle = Math.PI * 0.48;
+    controls.minDistance = 5;
+    controls.maxDistance = 120;
+    controls.target.set(0, 0, 0);
+
+    controls.addEventListener('start', () => {
+      userInteracting = true;
+      userInteractTimer = 300; // 5 seconds before director resumes
+    });
+
+    // Fog
+    scene.fog = new THREE.FogExp2(0x88bbcc, 0.003);
+
+    // Sky
+    scene.background = createSkyTexture(136, 187, 238, 204, 238, 255);
+
+    // Lights
+    sunLight = new THREE.DirectionalLight(0xfff8e0, 1.5);
+    sunLight.position.set(50, 100, 30);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
+    sunLight.shadow.camera.near = 1;
+    sunLight.shadow.camera.far = 300;
+    sunLight.shadow.camera.left = -100;
+    sunLight.shadow.camera.right = 100;
+    sunLight.shadow.camera.top = 100;
+    sunLight.shadow.camera.bottom = -100;
+    sunLight.shadow.bias = -0.002;
+    scene.add(sunLight);
+
+    moonLight = new THREE.DirectionalLight(0xaabbdd, 0);
+    moonLight.position.set(-50, 80, -30);
+    scene.add(moonLight);
+
+    ambientLight = new THREE.HemisphereLight(0x88bbee, 0x6a5a3a, 0.4);
+    scene.add(ambientLight);
+
+    // Build world
+    createTerrain();
+    createWater();
+    createTrees();
+    createGrass();
+    createRocks();
+    createFireflies();
+
+    // HUD elements
+    hudEl = document.getElementById('hud');
+    pauseEl = document.getElementById('pause-overlay');
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  }
+
+  // ===== Terrain =====
+  function createTerrain() {
+    const geo = new THREE.PlaneGeometry(200, 200, 64, 64);
+    const positions = geo.attributes.position;
+    const colors = new Float32Array(positions.count * 3);
+
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i);
+      const y = positions.getY(i);
+      const h = getTerrainHeight(x, y);
+      positions.setZ(i, h);
+
+      // Vertex colors: green variation
+      const bright = 0.35 + h * 0.04 + Math.random() * 0.08;
+      colors[i * 3] = 0.2 + bright * 0.2;     // R
+      colors[i * 3 + 1] = 0.4 + bright * 0.3; // G
+      colors[i * 3 + 2] = 0.1 + bright * 0.1; // B
+    }
+
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+    geo.rotateX(-Math.PI / 2);
+
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.9,
+      metalness: 0,
+    });
+
+    terrainMesh = new THREE.Mesh(geo, mat);
+    terrainMesh.receiveShadow = true;
+    scene.add(terrainMesh);
+  }
+
+  // ===== Water =====
+  function createWater() {
+    const geo = new THREE.CircleGeometry(15, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x3a7aaa,
+      metalness: 0.9,
+      roughness: 0.1,
+      transparent: true,
+      opacity: 0.8,
+    });
+    waterMesh = new THREE.Mesh(geo, mat);
+    waterMesh.rotation.x = -Math.PI / 2;
+    waterMesh.position.set(25, -0.3, -18);
+    scene.add(waterMesh);
+  }
+
+  // ===== Trees =====
+  function createTrees() {
+    const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 8, 6);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 0.9 });
+    const leafGeo = new THREE.SphereGeometry(3, 8, 6);
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2a5a1a, roughness: 0.8 });
+
+    for (let i = 0; i < TREE_COUNT; i++) {
+      const angle = (i / TREE_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      const radius = 85 + Math.random() * 10;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      const h = getTerrainHeight(x, z);
+
+      const treeGroup = new THREE.Group();
+      treeGroup.position.set(x, h, z);
+
+      // Trunk
+      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+      trunk.position.y = 4;
+      trunk.castShadow = true;
+      treeGroup.add(trunk);
+
+      // Leaf clusters (2-3)
+      const clusterCount = 2 + Math.floor(Math.random() * 2);
+      for (let c = 0; c < clusterCount; c++) {
+        const leaf = new THREE.Mesh(leafGeo, leafMat);
+        leaf.position.set(
+          (Math.random() - 0.5) * 3,
+          7 + Math.random() * 3,
+          (Math.random() - 0.5) * 3
+        );
+        leaf.scale.setScalar(0.7 + Math.random() * 0.6);
+        leaf.castShadow = true;
+        treeGroup.add(leaf);
+      }
+
+      scene.add(treeGroup);
+    }
+  }
+
+  // ===== Grass Blades =====
+  function createGrass() {
+    const bladeGeo = new THREE.PlaneGeometry(0.15, 1.0, 1, 1);
+    // Shift geometry so bottom is at origin
+    bladeGeo.translate(0, 0.5, 0);
+
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: 0x4a8c3a,
+      side: THREE.DoubleSide,
+      roughness: 0.8,
+    });
+
+    grassInstanced = new THREE.InstancedMesh(bladeGeo, bladeMat, GRASS_COUNT);
+    grassInstanced.receiveShadow = true;
+
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < GRASS_COUNT; i++) {
+      const x = (Math.random() - 0.5) * 170;
+      const z = (Math.random() - 0.5) * 170;
+      // Skip the pond area
+      const pondDist = Math.sqrt((x - 25) ** 2 + (z + 18) ** 2);
+      if (pondDist < 17) { // skip pond + margin
+        // Still place the instance but outside pond
+        const angle = Math.random() * Math.PI * 2;
+        const r = 17 + Math.random() * 5;
+        const nx = 25 + Math.cos(angle) * r;
+        const nz = -18 + Math.sin(angle) * r;
+        const h = getTerrainHeight(nx, nz);
+        dummy.position.set(nx, h, nz);
+      } else {
+        const h = getTerrainHeight(x, z);
+        dummy.position.set(x, h, z);
+      }
+      dummy.rotation.set(0, Math.random() * Math.PI, 0);
+      dummy.scale.set(1, 0.6 + Math.random() * 0.8, 1);
+      dummy.updateMatrix();
+      grassInstanced.setMatrixAt(i, dummy.matrix);
+    }
+    grassInstanced.instanceMatrix.needsUpdate = true;
+    scene.add(grassInstanced);
+  }
+
+  // ===== Rocks =====
+  function createRocks() {
+    const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: 0x8a8a7a,
+      roughness: 0.9,
+      metalness: 0.05,
+    });
+
+    const rockInstanced = new THREE.InstancedMesh(rockGeo, rockMat, ROCK_COUNT);
+    rockInstanced.castShadow = true;
+    rockInstanced.receiveShadow = true;
+
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < ROCK_COUNT; i++) {
+      const x = (Math.random() - 0.5) * 160;
+      const z = (Math.random() - 0.5) * 160;
+      const h = getTerrainHeight(x, z);
+      dummy.position.set(x, h + 0.3, z);
+      const s = 0.5 + Math.random() * 1.5;
+      dummy.scale.set(s, s * (0.5 + Math.random() * 0.5), s);
+      dummy.rotation.set(Math.random() * 0.5, Math.random() * Math.PI * 2, Math.random() * 0.5);
+      dummy.updateMatrix();
+      rockInstanced.setMatrixAt(i, dummy.matrix);
+    }
+    rockInstanced.instanceMatrix.needsUpdate = true;
+    scene.add(rockInstanced);
+  }
+
+  // ===== Fireflies =====
+  function createFireflies() {
+    const positions = new Float32Array(FIREFLY_COUNT * 3);
+    fireflyData = [];
+    for (let i = 0; i < FIREFLY_COUNT; i++) {
+      const x = (Math.random() - 0.5) * 150;
+      const y = 2 + Math.random() * 8;
+      const z = (Math.random() - 0.5) * 150;
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+      fireflyData.push({
+        x, y, z,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.02 + Math.random() * 0.03,
+      });
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xffee66,
+      size: 0.5,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    firefliesPoints = new THREE.Points(geo, mat);
+    scene.add(firefliesPoints);
+  }
+
+  // ===== Creatures (Bots) =====
+  function createCreature(bot) {
+    const group = new THREE.Group();
+    group.userData = { bot, prevAngle: bot.angle };
+
+    const baseSize = 1.2;
+    const bodyColor = new THREE.Color(bot.colorHex);
+
+    // Body (thorax)
+    const bodyGeo = new THREE.SphereGeometry(baseSize, 10, 8);
+    bodyGeo.scale(1, 0.7, 1.3);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      roughness: 0.6,
+      metalness: 0.05,
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = baseSize * 0.8;
+    body.castShadow = true;
+    group.add(body);
+    group.userData.body = body;
+    group.userData.bodyMat = bodyMat;
+
+    // Head
+    const headSize = baseSize * 0.55;
+    const headGeo = new THREE.SphereGeometry(headSize, 8, 6);
+    const headMat = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      roughness: 0.6,
+      metalness: 0.05,
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.set(0, baseSize * 0.85, baseSize * 1.15);
+    group.add(head);
+    group.userData.head = head;
+
+    // Eyes
+    const eyeSize = headSize * 0.4;
+    const eyeGeo = new THREE.SphereGeometry(eyeSize, 8, 6);
+    const scleraMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const pupilGeo = new THREE.SphereGeometry(eyeSize * 0.45, 6, 6);
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+
+    const eyes = [];
+    [-0.3, 0.3].forEach(side => {
+      const eye = new THREE.Mesh(eyeGeo, scleraMat);
+      eye.position.set(side * headSize, headSize * 0.2, headSize * 0.7);
+      head.add(eye);
+
+      const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+      pupil.position.z = eyeSize * 0.5;
+      eye.add(pupil);
+      eyes.push({ eye, pupil });
+    });
+    group.userData.eyes = eyes;
+
+    // Antennae
+    const antGeo = new THREE.ConeGeometry(0.04, 0.8, 4);
+    [-0.15, 0.15].forEach(side => {
+      const ant = new THREE.Mesh(antGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
+      ant.position.set(side, headSize * 0.8, headSize * 0.3);
+      ant.rotation.x = -0.3;
+      ant.rotation.z = side > 0 ? 0.2 : -0.2;
+      head.add(ant);
+    });
+
+    // Mandibles
+    const mandGeo = new THREE.ConeGeometry(0.06, 0.5, 4);
+    const mandMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+    const mandibles = [];
+    [-0.12, 0.12].forEach(side => {
+      const mand = new THREE.Mesh(mandGeo, mandMat);
+      mand.position.set(side, -headSize * 0.1, headSize * 0.8);
+      mand.rotation.x = Math.PI / 2;
+      head.add(mand);
+      mandibles.push(mand);
+    });
+    group.userData.mandibles = mandibles;
+
+    // Shell (defence indicator)
+    const shellGeo = new THREE.SphereGeometry(baseSize * 1.05, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    shellGeo.scale(1, 0.5, 1.3);
+    const shellMat = new THREE.MeshStandardMaterial({
+      color: bodyColor.clone().multiplyScalar(0.6),
+      roughness: 0.3,
+      metalness: 0.3,
+      transparent: true,
+      opacity: 0,
+    });
+    const shell = new THREE.Mesh(shellGeo, shellMat);
+    shell.position.y = baseSize * 0.8 + baseSize * 0.3;
+    shell.visible = false;
+    group.add(shell);
+    group.userData.shell = shell;
+    group.userData.shellMat = shellMat;
+
+    // Legs
+    group.userData.legs = [];
+    group.userData.legContainer = new THREE.Group();
+    group.add(group.userData.legContainer);
+    rebuildLegs(group, bot);
+
+    // Player star indicator
+    if (bot.isPlayer) {
+      const starGeo = new THREE.OctahedronGeometry(0.3, 0);
+      const starMat = new THREE.MeshStandardMaterial({
+        color: 0xffdd44,
+        emissive: 0xffaa00,
+        emissiveIntensity: 0.5,
+      });
+      const star = new THREE.Mesh(starGeo, starMat);
+      star.position.y = baseSize * 2.5;
+      group.add(star);
+      group.userData.star = star;
+    }
+
+    scene.add(group);
+    return group;
+  }
+
+  function rebuildLegs(group, bot) {
+    const legContainer = group.userData.legContainer;
+    // Remove old legs
+    while (legContainer.children.length > 0) {
+      legContainer.remove(legContainer.children[0]);
+    }
+
+    const legPairs = Math.min(3, 1 + Math.floor(bot.speed / 3));
+    const baseSize = 1.2;
+    const legGeo = new THREE.CylinderGeometry(0.04, 0.06, 0.6, 4);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const legs = [];
+
+    for (let p = 0; p < legPairs; p++) {
+      const zOff = (p - (legPairs - 1) / 2) * 0.5;
+      [-1, 1].forEach(side => {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(side * baseSize * 0.6, baseSize * 0.2, zOff);
+        leg.rotation.z = side * 0.5;
+        legContainer.add(leg);
+        legs.push(leg);
+      });
+    }
+    group.userData.legs = legs;
+    group.userData.lastLegPairs = legPairs;
+  }
+
+  function updateCreature(group, bot, frame) {
+    const pos = fieldToGarden(bot.x, bot.y);
+    const terrY = getTerrainHeight(pos.x, pos.z);
+    const baseSize = 1.2;
+
+    // Smooth position
+    group.position.x += (pos.x - group.position.x) * 0.15;
+    group.position.z += (pos.z - group.position.z) * 0.15;
+    group.position.y += (terrY - group.position.y) * 0.15;
+
+    // Target angle (bot.angle is atan2(dy, dx), we want rotation around Y)
+    const targetRot = -bot.angle + Math.PI / 2;
+    // Smooth rotation (slerp-like for Y axis)
+    let angleDiff = targetRot - group.rotation.y;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    group.rotation.y += angleDiff * 0.1;
+
+    // Movement detection
+    const dx = pos.x - (group.userData.lastX || pos.x);
+    const dz = pos.z - (group.userData.lastZ || pos.z);
+    const moving = Math.sqrt(dx * dx + dz * dz) > 0.01;
+    group.userData.lastX = pos.x;
+    group.userData.lastZ = pos.z;
+
+    // Body bob when moving
+    const body = group.userData.body;
+    if (moving) {
+      body.position.y = baseSize * 0.8 + Math.sin(frame * 0.15) * 0.15;
+      // Tilt forward
+      body.rotation.x = -0.15;
+    } else {
+      body.position.y += (baseSize * 0.8 - body.position.y) * 0.1;
+      body.rotation.x *= 0.9;
+    }
+
+    // Mandible size based on attack
+    const mandLength = 0.3 + bot.attack * 0.1;
+    group.userData.mandibles.forEach(m => {
+      m.scale.set(1, 1, mandLength);
+    });
+
+    // Shell based on defence
+    const shell = group.userData.shell;
+    const shellMat = group.userData.shellMat;
+    if (bot.defence > 2) {
+      shell.visible = true;
+      const coverage = Math.min(1, bot.defence * 0.08);
+      shell.scale.set(1, coverage, 1);
+      shellMat.opacity = 0.3 + coverage * 0.5;
+    } else {
+      shell.visible = false;
+    }
+
+    // Rebuild legs if needed
+    const expectedPairs = Math.min(3, 1 + Math.floor(bot.speed / 3));
+    if (expectedPairs !== group.userData.lastLegPairs) {
+      rebuildLegs(group, bot);
+    }
+
+    // Leg animation
+    if (moving) {
+      group.userData.legs.forEach((leg, i) => {
+        leg.rotation.x = Math.sin(frame * 0.2 + i * Math.PI * 0.5) * 0.3;
+      });
+    }
+
+    // Damage flash
+    if (bot.justTookDamage && bot.damageTimer > 100) {
+      group.userData.bodyMat.emissive.setHex(0xff0000);
+      group.userData.bodyMat.emissiveIntensity = 0.5;
+    } else {
+      group.userData.bodyMat.emissive.setHex(0x000000);
+      group.userData.bodyMat.emissiveIntensity = 0;
+    }
+
+    // Pupil direction - toward target
+    const targetPos = fieldToGarden(bot.targetX, bot.targetY);
+    const lookDirX = targetPos.x - group.position.x;
+    const lookDirZ = targetPos.z - group.position.z;
+    const lookDist = Math.sqrt(lookDirX * lookDirX + lookDirZ * lookDirZ);
+    if (lookDist > 0.1) {
+      const eyeSize = baseSize * 0.55 * 0.4;
+      group.userData.eyes.forEach(e => {
+        // Pupil offset in local space of eye
+        const localAngle = Math.atan2(lookDirX, lookDirZ) - group.rotation.y;
+        e.pupil.position.x = Math.sin(localAngle) * eyeSize * 0.3;
+        e.pupil.position.y = 0;
+        e.pupil.position.z = Math.cos(localAngle) * eyeSize * 0.3 + eyeSize * 0.3;
+      });
+    }
+
+    // Star spin for player
+    if (group.userData.star) {
+      group.userData.star.rotation.y = frame * 0.03;
+      group.userData.star.position.y = baseSize * 2.5 + Math.sin(frame * 0.05) * 0.2;
+    }
+  }
+
+  // ===== Flowers (Food) =====
+  function createFlower(dot) {
+    const group = new THREE.Group();
+    group.userData = { dot };
+
+    // Stem
+    const stemGeo = new THREE.CylinderGeometry(0.05, 0.07, 1.2, 4);
+    const stemMat = new THREE.MeshStandardMaterial({ color: 0x3a7a2a });
+    const stem = new THREE.Mesh(stemGeo, stemMat);
+    stem.position.y = 0.6;
+    group.add(stem);
+
+    // Petals
+    const flowerColors = [0xff6688, 0xffaa44, 0xff44aa, 0xaa66ff, 0xffff44];
+    const petalColor = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+    const petalGeo = new THREE.SphereGeometry(0.2, 5, 4);
+    petalGeo.scale(1, 0.3, 1.5);
+    const petalMat = new THREE.MeshStandardMaterial({ color: petalColor, roughness: 0.7 });
+
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2;
+      const petal = new THREE.Mesh(petalGeo, petalMat);
+      petal.position.set(Math.cos(angle) * 0.2, 1.2, Math.sin(angle) * 0.2);
+      petal.rotation.y = angle;
+      petal.rotation.x = 0.3;
+      group.add(petal);
+    }
+
+    // Center
+    const centerGeo = new THREE.SphereGeometry(0.12, 6, 6);
+    const centerMat = new THREE.MeshStandardMaterial({
+      color: 0xffcc00,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.3,
+    });
+    const center = new THREE.Mesh(centerGeo, centerMat);
+    center.position.y = 1.2;
+    group.add(center);
+
+    // Position
+    const pos = fieldToGarden(dot.x, dot.y);
+    const terrY = getTerrainHeight(pos.x, pos.z);
+    group.position.set(pos.x, terrY, pos.z);
+
+    scene.add(group);
+    return group;
+  }
+
+  function updateFlower(group, dot, frame) {
+    const pos = fieldToGarden(dot.x, dot.y);
+    const terrY = getTerrainHeight(pos.x, pos.z);
+    group.position.set(pos.x, terrY, pos.z);
+    // Wind sway
+    group.rotation.z = Math.sin(frame * 0.02 + pos.x * 0.5) * 0.05;
+    group.rotation.x = Math.sin(frame * 0.018 + pos.z * 0.3) * 0.04;
+  }
+
+  // ===== Death Garden (Memorial Flowers) =====
+  function spawnDeathGarden(worldX, worldY, botHue) {
+    const pos = fieldToGarden(worldX, worldY);
+    const color = new THREE.Color().setHSL(botHue / 360, 0.6, 0.5);
+
+    for (let i = 0; i < 3; i++) {
+      const group = new THREE.Group();
+      const ox = (Math.random() - 0.5) * 2;
+      const oz = (Math.random() - 0.5) * 2;
+      const gx = pos.x + ox;
+      const gz = pos.z + oz;
+      const terrY = getTerrainHeight(gx, gz);
+      group.position.set(gx, terrY, gz);
+
+      // Small stem
+      const stemGeo = new THREE.CylinderGeometry(0.03, 0.04, 0.7, 4);
+      const stemMat = new THREE.MeshStandardMaterial({ color: 0x3a7a2a });
+      const stem = new THREE.Mesh(stemGeo, stemMat);
+      stem.position.y = 0.35;
+      group.add(stem);
+
+      // Petals in dead bot's color
+      const petalGeo = new THREE.SphereGeometry(0.12, 5, 4);
+      petalGeo.scale(1, 0.3, 1.5);
+      const petalMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+      for (let p = 0; p < 4; p++) {
+        const angle = (p / 4) * Math.PI * 2;
+        const petal = new THREE.Mesh(petalGeo, petalMat);
+        petal.position.set(Math.cos(angle) * 0.1, 0.7, Math.sin(angle) * 0.1);
+        petal.rotation.y = angle;
+        group.add(petal);
+      }
+
+      // Center
+      const centerGeo = new THREE.SphereGeometry(0.06, 5, 5);
+      const centerMat = new THREE.MeshStandardMaterial({ color: 0xffcc00 });
+      const center = new THREE.Mesh(centerGeo, centerMat);
+      center.position.y = 0.7;
+      group.add(center);
+
+      // Start small and grow
+      group.scale.setScalar(0.01);
+      group.userData.growing = true;
+      group.userData.growFrame = 0;
+
+      scene.add(group);
+      deathGardens.push(group);
+    }
+
+    // Limit total memorial flowers
+    while (deathGardens.length > 60) {
+      const old = deathGardens.shift();
+      scene.remove(old);
+    }
+  }
+
+  // ===== Combat Particles =====
+  function spawnCombatParticles(worldX, worldY) {
+    const pos = fieldToGarden(worldX, worldY);
+    const terrY = getTerrainHeight(pos.x, pos.z);
+
+    for (let i = 0; i < 5; i++) {
+      const geo = new THREE.SphereGeometry(0.1, 4, 4);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x8a7a5a });
+      const particle = new THREE.Mesh(geo, mat);
+      particle.position.set(
+        pos.x + (Math.random() - 0.5) * 1,
+        terrY + 0.5,
+        pos.z + (Math.random() - 0.5) * 1
+      );
+      particle.userData = {
+        vx: (Math.random() - 0.5) * 0.1,
+        vy: 0.1 + Math.random() * 0.1,
+        vz: (Math.random() - 0.5) * 0.1,
+        life: 40,
+      };
+      scene.add(particle);
+      combatParticles.push(particle);
+    }
+  }
+
+  // ===== Death Animation =====
+  function startDeathAnim(group, bot) {
+    deathAnims.push({
+      group,
+      frame: 0,
+      duration: 60,
+      originalY: group.position.y,
+      hue: bot.hue,
+      worldX: bot.x,
+      worldY: bot.y,
+    });
+  }
+
+  function updateDeathAnims() {
+    for (let i = deathAnims.length - 1; i >= 0; i--) {
+      const da = deathAnims[i];
+      da.frame++;
+      const t = da.frame / da.duration;
+
+      // Curl up and shrink
+      da.group.scale.y = Math.max(0.01, 1 - t);
+      da.group.scale.x = Math.max(0.01, 1 - t * 0.5);
+      da.group.scale.z = Math.max(0.01, 1 - t * 0.5);
+
+      // Gray out
+      if (da.group.userData.bodyMat) {
+        da.group.userData.bodyMat.color.lerp(new THREE.Color(0x666666), 0.05);
+      }
+
+      if (da.frame >= da.duration) {
+        // Reset scale and reposition for respawn
+        da.group.scale.set(1, 1, 1);
+        if (da.group.userData.bodyMat) {
+          da.group.userData.bodyMat.color.setHex(da.group.userData.bot.colorHex);
+        }
+        // Memorial flowers
+        spawnDeathGarden(da.worldX, da.worldY, da.hue);
+        deathAnims.splice(i, 1);
+      }
+    }
+  }
+
+  // ===== Day/Night Cycle =====
+  function updateDayNight(frame) {
+    const phase = (frame % DAY_CYCLE_FRAMES) / DAY_CYCLE_FRAMES;
+    const sunAngle = phase * Math.PI * 2 - Math.PI / 2;
+
+    // Sun position (circular path)
+    sunLight.position.set(
+      Math.cos(sunAngle) * 150,
+      Math.sin(sunAngle) * 150,
+      50
+    );
+
+    // Sun intensity
+    const sunUp = Math.sin(sunAngle);
+    sunLight.intensity = Math.max(0, sunUp) * 1.5;
+
+    // Moon
+    moonLight.position.set(
+      -Math.cos(sunAngle) * 150,
+      -Math.sin(sunAngle) * 100,
+      -30
+    );
+    moonLight.intensity = Math.max(0, -sunUp) * 0.4;
+
+    // Ambient
+    ambientLight.intensity = 0.2 + Math.max(0, sunUp) * 0.3;
+
+    // Sky colors
+    let topR, topG, topB, botR, botG, botB;
+    let sunColor;
+    let fogColor;
+
+    if (phase < 0.2) {
+      // Dawn
+      const t = phase / 0.2;
+      topR = lerpVal(255, 136, t); topG = lerpVal(136, 187, t); topB = lerpVal(68, 238, t);
+      botR = lerpVal(255, 204, t); botG = lerpVal(200, 238, t); botB = lerpVal(120, 255, t);
+      sunColor = new THREE.Color().setRGB(
+        lerpVal(1, 1, t), lerpVal(0.7, 0.97, t), lerpVal(0.4, 0.88, t)
+      );
+      fogColor = new THREE.Color(lerpVal(0.9, 0.53, t), lerpVal(0.7, 0.73, t), lerpVal(0.5, 0.8, t));
+    } else if (phase < 0.5) {
+      // Day
+      topR = 136; topG = 187; topB = 238;
+      botR = 204; botG = 238; botB = 255;
+      sunColor = new THREE.Color(0xfff8e0);
+      fogColor = new THREE.Color(0.53, 0.73, 0.8);
+    } else if (phase < 0.75) {
+      // Dusk
+      const t = (phase - 0.5) / 0.25;
+      topR = lerpVal(136, 60, t); topG = lerpVal(187, 30, t); topB = lerpVal(238, 80, t);
+      botR = lerpVal(204, 200, t); botG = lerpVal(238, 100, t); botB = lerpVal(255, 60, t);
+      sunColor = new THREE.Color().setRGB(
+        lerpVal(1, 1, t), lerpVal(0.97, 0.5, t), lerpVal(0.88, 0.3, t)
+      );
+      fogColor = new THREE.Color(lerpVal(0.53, 0.2, t), lerpVal(0.73, 0.15, t), lerpVal(0.8, 0.3, t));
+    } else {
+      // Night
+      const t = (phase - 0.75) / 0.25;
+      topR = lerpVal(60, 10, t); topG = lerpVal(30, 10, t); topB = lerpVal(80, 40, t);
+      botR = lerpVal(200, 20, t); botG = lerpVal(100, 15, t); botB = lerpVal(60, 50, t);
+      sunColor = new THREE.Color(0xaabbdd);
+      fogColor = new THREE.Color(lerpVal(0.2, 0.05, t), lerpVal(0.15, 0.04, t), lerpVal(0.3, 0.12, t));
+    }
+
+    sunLight.color.copy(sunColor);
+    scene.fog.color.copy(fogColor);
+    scene.background = createSkyTexture(
+      Math.round(topR), Math.round(topG), Math.round(topB),
+      Math.round(botR), Math.round(botG), Math.round(botB)
+    );
+
+    // Renderer exposure
+    renderer.toneMappingExposure = 0.6 + Math.max(0, sunUp) * 0.6;
+
+    // Water color shift
+    if (waterMesh) {
+      waterMesh.position.y = -0.3 + Math.sin(frame * 0.01) * 0.05;
+    }
+
+    // Fireflies
+    const fireflyIntensity = phase > 0.5 ? Math.min(1, (phase - 0.5) * 4) : 0;
+    updateFireflies(frame, fireflyIntensity);
+  }
+
+  function updateFireflies(frame, intensity) {
+    if (!firefliesPoints) return;
+    firefliesPoints.material.opacity = intensity;
+    if (intensity <= 0) return;
+
+    const positions = firefliesPoints.geometry.attributes.position;
+    for (let i = 0; i < FIREFLY_COUNT; i++) {
+      const ff = fireflyData[i];
+      ff.x += (Math.random() - 0.5) * 0.08;
+      ff.y += (Math.random() - 0.5) * 0.04;
+      ff.z += (Math.random() - 0.5) * 0.08;
+      // Keep in bounds
+      ff.x = Math.max(-80, Math.min(80, ff.x));
+      ff.y = Math.max(1, Math.min(12, ff.y));
+      ff.z = Math.max(-80, Math.min(80, ff.z));
+
+      // Blink
+      const blink = Math.max(0, Math.sin(frame * 0.05 + ff.phase));
+      positions.setXYZ(i, ff.x, ff.y + blink * 0.3, ff.z);
+    }
+    positions.needsUpdate = true;
+    // Size varies with blink
+    firefliesPoints.material.size = 0.3 + Math.sin(frame * 0.03) * 0.15;
+  }
+
+  // ===== Grass Wind Animation =====
+  function updateGrass(frame) {
+    if (!grassInstanced) return;
+    const dummy = new THREE.Object3D();
+    const matrix = new THREE.Matrix4();
+
+    for (let i = 0; i < GRASS_COUNT; i++) {
+      grassInstanced.getMatrixAt(i, matrix);
+      // Decompose to get position
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      matrix.decompose(pos, quat, scale);
+
+      // Wind sway: rotate Z based on position and time
+      const windSway = Math.sin(frame * 0.02 + pos.x * 0.3 + pos.z * 0.2) * 0.08;
+      dummy.position.copy(pos);
+      dummy.rotation.set(0, 0, windSway);
+      // Preserve original Y rotation from quaternion (approximately)
+      const euler = new THREE.Euler().setFromQuaternion(quat);
+      dummy.rotation.y = euler.y;
+      dummy.rotation.z = windSway;
+      dummy.scale.copy(scale);
+      dummy.updateMatrix();
+      grassInstanced.setMatrixAt(i, dummy.matrix);
+    }
+    grassInstanced.instanceMatrix.needsUpdate = true;
+  }
+
+  // ===== Camera Director =====
+  function updateDirector(frame) {
+    if (userInteractTimer > 0) {
+      userInteractTimer--;
+      if (userInteractTimer === 0) userInteracting = false;
+    }
+
+    if (!directorEnabled || userInteracting) return;
+
+    directorTimer++;
+    noEventTimer++;
+
+    // Check for interesting events
+    let combatEvent = null;
+    let deathEvent = null;
+    for (const ev of engine.events) {
+      if (ev.type === 'combat') { combatEvent = ev; noEventTimer = 0; }
+      if (ev.type === 'death') { deathEvent = ev; noEventTimer = 0; }
+    }
+
+    // Decide camera mode
+    if (deathEvent && directorTimer > 60) {
+      directorMode = 'closeup';
+      directorTarget = deathEvent.killer || engine.followedBot;
+      directorTimer = 0;
+    } else if (combatEvent && directorTimer > 60) {
+      directorMode = 'closeup';
+      directorTarget = combatEvent.bot1.isPlayer ? combatEvent.bot1 : combatEvent.bot2;
+      directorTimer = 0;
+    } else if (noEventTimer > 300 && directorTimer > 180) {
+      directorMode = 'establishing';
+      directorTimer = 0;
+      noEventTimer = 0;
+    } else if (directorTimer > 300) {
+      directorMode = 'follow';
+      directorTarget = engine.followedBot;
+      directorTimer = 0;
+    }
+
+    // Move camera based on mode
+    const followed = directorTarget || engine.followedBot;
+    const pos = fieldToGarden(followed.x, followed.y);
+    const terrY = getTerrainHeight(pos.x, pos.z);
+
+    switch (directorMode) {
+      case 'follow': {
+        const behindAngle = -followed.angle + Math.PI / 2 + Math.PI;
+        cameraTargetPos.set(
+          pos.x + Math.sin(behindAngle) * 20,
+          terrY + 10,
+          pos.z + Math.cos(behindAngle) * 20
+        );
+        cameraTargetLook.set(pos.x, terrY + 1.5, pos.z);
+        break;
+      }
+      case 'closeup': {
+        const closeAngle = -followed.angle + Math.PI / 2 + Math.PI * 0.8;
+        cameraTargetPos.set(
+          pos.x + Math.sin(closeAngle) * 8,
+          terrY + 4,
+          pos.z + Math.cos(closeAngle) * 8
+        );
+        cameraTargetLook.set(pos.x, terrY + 1, pos.z);
+        break;
+      }
+      case 'establishing': {
+        const orbitAngle = frame * 0.002;
+        cameraTargetPos.set(
+          Math.sin(orbitAngle) * 60,
+          35,
+          Math.cos(orbitAngle) * 60
+        );
+        cameraTargetLook.set(0, 0, 0);
+        break;
+      }
+    }
+
+    // Smooth lerp camera
+    const lerpSpeed = directorMode === 'establishing' ? 0.02 : 0.04;
+    camera.position.lerp(cameraTargetPos, lerpSpeed);
+    cameraCurrentLook.lerp(cameraTargetLook, lerpSpeed);
+    controls.target.copy(cameraCurrentLook);
+  }
+
+  // ===== Combat Particles Update =====
+  function updateCombatParticles() {
+    for (let i = combatParticles.length - 1; i >= 0; i--) {
+      const p = combatParticles[i];
+      p.position.x += p.userData.vx;
+      p.position.y += p.userData.vy;
+      p.position.z += p.userData.vz;
+      p.userData.vy -= 0.005; // gravity
+      p.userData.life--;
+
+      if (p.userData.life <= 0) {
+        scene.remove(p);
+        combatParticles.splice(i, 1);
+      }
+    }
+  }
+
+  // ===== Death Garden Growing =====
+  function updateDeathGardens() {
+    for (const g of deathGardens) {
+      if (g.userData.growing) {
+        g.userData.growFrame++;
+        const t = Math.min(1, g.userData.growFrame / 60);
+        g.scale.setScalar(t);
+        if (t >= 1) g.userData.growing = false;
+      }
+    }
+  }
+
+  // ===== HUD =====
+  function updateHUD(frame) {
+    const bot = engine.followedBot;
+    if (!bot) return;
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = (elapsed % 60).toString().padStart(2, '0');
+
+    // Day/night phase label
+    const phase = (frame % DAY_CYCLE_FRAMES) / DAY_CYCLE_FRAMES;
+    let timeOfDay;
+    if (phase < 0.2) timeOfDay = 'Dawn';
+    else if (phase < 0.5) timeOfDay = 'Day';
+    else if (phase < 0.75) timeOfDay = 'Dusk';
+    else timeOfDay = 'Night';
+    const timeIcon = phase < 0.5 ? '\u2600' : (phase < 0.75 ? '\u2600' : '\uD83C\uDF19');
+
+    const label = bot.isPlayer ? 'Player Creature' : `Creature #${bot.index}`;
+    const stats = `${label} | SPD ${bot.speed.toFixed(1)} ATK ${bot.attack.toFixed(1)} DEF ${bot.defence.toFixed(1)} LIV ${bot.lives.toFixed(1)} | K:${bot.killCount} | ${timeIcon} ${timeOfDay} | ${mins}:${secs}`;
+
+    if (stats !== lastHudStats) {
+      hudEl.textContent = (bot.isPlayer ? '\u2605 ' : '') + stats;
+      lastHudStats = stats;
+      showHud();
+    }
+
+    // Auto-hide
+    if (hudVisible) {
+      hudTimer--;
+      if (hudTimer <= 0) {
+        hudEl.classList.remove('visible');
+        hudVisible = false;
+      }
+    }
+  }
+
+  function showHud() {
+    hudEl.classList.add('visible');
+    hudVisible = true;
+    hudTimer = 180; // 3 seconds
+  }
+
+  // Show HUD on mouse move
+  document.addEventListener('mousemove', () => {
+    if (gameStarted) showHud();
+  });
+
+  // ===== Event Processing =====
+  function processEvents() {
+    for (const ev of engine.events) {
+      switch (ev.type) {
+        case 'combat': {
+          const midX = (ev.bot1.x + ev.bot2.x) / 2;
+          const midY = (ev.bot1.y + ev.bot2.y) / 2;
+          spawnCombatParticles(midX, midY);
+
+          // Squash-stretch on both combatants
+          const g1 = creatureGroups[ev.bot1.index];
+          const g2 = creatureGroups[ev.bot2.index];
+          if (g1) {
+            g1.scale.set(1.1, 0.85, 1.1);
+          }
+          if (g2) {
+            g2.scale.set(1.1, 0.85, 1.1);
+          }
+          break;
+        }
+        case 'death': {
+          const g = creatureGroups[ev.bot.index];
+          if (g) startDeathAnim(g, ev.bot);
+
+          // Winner puff
+          if (ev.killer) {
+            const gk = creatureGroups[ev.killer.index];
+            if (gk) gk.scale.set(1.15, 1.15, 1.15);
+          }
+          break;
+        }
+        case 'eat':
+          // Brief puff on the eater
+          const ge = creatureGroups[ev.bot.index];
+          if (ge) {
+            ge.scale.set(1.05, 1.05, 1.05);
+          }
+          break;
+      }
+    }
+  }
+
+  // ===== Scale Recovery (squash/stretch returns to normal) =====
+  function recoverScales() {
+    for (const g of creatureGroups) {
+      if (!g) continue;
+      g.scale.x += (1 - g.scale.x) * 0.1;
+      g.scale.y += (1 - g.scale.y) * 0.1;
+      g.scale.z += (1 - g.scale.z) * 0.1;
+    }
+  }
+
+  // ===== Input =====
+  function setupInput() {
+    document.addEventListener('keydown', (e) => {
+      if (!gameStarted) return;
+
+      switch (e.code) {
+        case 'Tab':
+          e.preventDefault();
+          engine.cycleFollowedBot();
+          directorTarget = engine.followedBot;
+          directorTimer = 0;
+          directorMode = 'follow';
+          showHud();
+          break;
+        case 'KeyD':
+          directorEnabled = !directorEnabled;
+          if (!directorEnabled) {
+            userInteracting = false;
+            userInteractTimer = 0;
+          }
+          break;
+        case 'Space':
+          e.preventDefault();
+          engine.paused = !engine.paused;
+          pauseEl.classList.toggle('visible', engine.paused);
+          break;
+        case 'Escape':
+          directorEnabled = true;
+          userInteracting = false;
+          userInteractTimer = 0;
+          directorMode = 'follow';
+          directorTarget = engine.followedBot;
+          directorTimer = 0;
+          break;
+      }
+    });
+  }
+
+  // ===== Main Loop =====
+  function animate() {
+    requestAnimationFrame(animate);
+    if (!gameStarted) return;
+
+    engine.update();
+    const frame = engine.frameCount;
+
+    // Process game events
+    processEvents();
+
+    // Update creatures
+    for (let i = 0; i < engine.bots.length; i++) {
+      if (creatureGroups[i]) {
+        updateCreature(creatureGroups[i], engine.bots[i], frame);
+      }
+    }
+
+    // Update flowers
+    for (let i = 0; i < engine.dots.length; i++) {
+      if (flowerGroups[i]) {
+        updateFlower(flowerGroups[i], engine.dots[i], frame);
+      }
+    }
+
+    // Update effects
+    updateDeathAnims();
+    updateCombatParticles();
+    updateDeathGardens();
+    recoverScales();
+
+    // Day/night cycle
+    updateDayNight(frame);
+
+    // Grass wind (every 3 frames for performance)
+    if (frame % 3 === 0) updateGrass(frame);
+
+    // Camera director
+    updateDirector(frame);
+
+    // HUD
+    updateHUD(frame);
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  // ===== Start =====
+  function startGame() {
+    engine = new GameEngine();
+    engine.init();
+    startTime = Date.now();
+
+    // Create creatures
+    creatureGroups = [];
+    for (const bot of engine.bots) {
+      creatureGroups.push(createCreature(bot));
+    }
+
+    // Create flowers
+    flowerGroups = [];
+    for (const dot of engine.dots) {
+      flowerGroups.push(createFlower(dot));
+    }
+
+    // Initial camera position
+    const playerPos = fieldToGarden(engine.playerBot.x, engine.playerBot.y);
+    const terrY = getTerrainHeight(playerPos.x, playerPos.z);
+    camera.position.set(playerPos.x - 15, terrY + 12, playerPos.z + 20);
+    controls.target.set(playerPos.x, terrY + 1, playerPos.z);
+    cameraCurrentLook.set(playerPos.x, terrY + 1, playerPos.z);
+    cameraTargetLook.copy(cameraCurrentLook);
+    cameraTargetPos.copy(camera.position);
+
+    gameStarted = true;
+    showHud();
+  }
+
+  // ===== Init =====
+  initScene();
+  setupInput();
+  animate();
+
+  // Setup screen
+  document.getElementById('enter-btn').addEventListener('click', () => {
+    const setupScreen = document.getElementById('setup-screen');
+    setupScreen.style.opacity = '0';
+    setTimeout(() => {
+      setupScreen.style.display = 'none';
+      startGame();
+    }, 800);
+  });
+
+})();
+</script>
+</body>
+</html>

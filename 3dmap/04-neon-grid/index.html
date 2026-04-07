@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neon Grid - Bots in a Field 3D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #050510; overflow: hidden; font-family: 'Courier New', monospace; }
+  canvas { display: block; filter: contrast(1.1) brightness(1.05); }
+
+  /* Setup Screen */
+  #setup-screen {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #050510;
+    z-index: 100;
+  }
+  #setup-card {
+    border: 1px solid #00ffff;
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.3), inset 0 0 30px rgba(0, 255, 255, 0.05);
+    padding: 60px 80px;
+    text-align: center;
+    background: rgba(5, 5, 16, 0.95);
+  }
+  #setup-card h1 {
+    font-family: 'Courier New', monospace;
+    font-size: 48px;
+    color: #00ffff;
+    text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff;
+    letter-spacing: 12px;
+    margin-bottom: 12px;
+  }
+  #setup-card .subtitle {
+    color: #ff00aa;
+    font-size: 14px;
+    letter-spacing: 4px;
+    text-shadow: 0 0 10px #ff00aa;
+    margin-bottom: 50px;
+  }
+  #init-btn {
+    font-family: 'Courier New', monospace;
+    font-size: 18px;
+    color: #00ffff;
+    background: transparent;
+    border: 1px solid #00ffff;
+    padding: 14px 50px;
+    cursor: pointer;
+    letter-spacing: 6px;
+    text-shadow: 0 0 10px #00ffff;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+    transition: all 0.3s;
+  }
+  #init-btn:hover {
+    background: rgba(0, 255, 255, 0.1);
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+  }
+
+  /* HUD */
+  #hud {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #00ffff;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    text-shadow: 0 0 10px #00ffff;
+    background: rgba(5, 5, 16, 0.7);
+    padding: 10px 24px;
+    border: 1px solid rgba(0, 255, 255, 0.3);
+    white-space: nowrap;
+    display: none;
+    z-index: 10;
+  }
+
+  /* Kill Feed */
+  #kill-feed {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Courier New', monospace;
+    font-size: 22px;
+    pointer-events: none;
+    z-index: 10;
+    text-align: center;
+  }
+  .kill-msg {
+    opacity: 1;
+    transition: opacity 2s;
+    text-shadow: 0 0 15px currentColor;
+    margin: 4px 0;
+  }
+  .kill-msg.fade { opacity: 0; }
+
+  /* Camera mode indicator */
+  #cam-mode {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    color: rgba(0, 255, 255, 0.5);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    text-shadow: 0 0 6px #00ffff;
+    display: none;
+    z-index: 10;
+  }
+
+  /* Controls hint */
+  #controls-hint {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(0, 255, 255, 0.3);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    display: none;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<div id="setup-screen">
+  <div id="setup-card">
+    <h1>NEON GRID</h1>
+    <div class="subtitle">BOTS IN A FIELD &mdash; 3D</div>
+    <button id="init-btn">INITIALIZE</button>
+  </div>
+</div>
+
+<div id="hud"></div>
+<div id="kill-feed"></div>
+<div id="cam-mode">FOLLOW CAM</div>
+<div id="controls-hint">1-4: CAM | TAB: CYCLE | SPACE: PAUSE | T: TRAILS</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+// ============================================================
+// GAME ENGINE (inline from shared/game-engine.js)
+// ============================================================
+
+const WORLD_WIDTH = 2000;
+const WORLD_HEIGHT = 2000;
+const BOT_COUNT = 20;
+const DOT_COUNT = 50;
+const STARTING_STATS = { speed: 5, attack: 5, defence: 5, lives: 3 };
+const TOTAL_POINTS = 18;
+
+class YellowDot {
+  constructor() {
+    this.size = 6;
+    this.respawn();
+  }
+  respawn() {
+    const m = 50;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+  }
+}
+
+class Bot {
+  constructor(index, isPlayer = false) {
+    this.index = index;
+    this.isPlayer = isPlayer;
+    this.size = 10 + Math.random() * 6;
+    this.hue = isPlayer ? 200 : Math.random() * 360;
+    this.color = `hsl(${this.hue}, 70%, 50%)`;
+    this.colorHex = this._hslToHex(this.hue, 70, 50);
+    this.killCount = 0;
+    this.combatCooldown = 0;
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.angle = 0;
+    this.lifetime = 0;
+    this.justTookDamage = false;
+    this.justDealtDamage = false;
+    this.damageTimer = 0;
+    this.damageDealtTimer = 0;
+    this.lastAttacker = null;
+
+    this.speed = isPlayer ? STARTING_STATS.speed : STARTING_STATS.speed;
+    this.attack = isPlayer ? STARTING_STATS.attack : STARTING_STATS.attack;
+    this.defence = isPlayer ? STARTING_STATS.defence : STARTING_STATS.defence;
+    this.lives = isPlayer ? STARTING_STATS.lives : STARTING_STATS.lives;
+    this.initialLives = this.lives;
+
+    this.spawnAtRandom();
+  }
+
+  _hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); };
+    return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8) | Math.round(f(4) * 255);
+  }
+
+  get totalStats() { return this.speed + this.attack + this.defence + this.lives; }
+
+  spawnAtRandom() {
+    const m = 100;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.combatCooldown = 0;
+  }
+
+  resetStats() {
+    this.speed = STARTING_STATS.speed;
+    this.attack = STARTING_STATS.attack;
+    this.defence = STARTING_STATS.defence;
+    this.lives = STARTING_STATS.lives;
+    this.initialLives = this.lives;
+  }
+
+  addRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat]++;
+    if (stat === 'lives') this.initialLives++;
+  }
+
+  addPartialRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat] += 0.1;
+    if (stat === 'lives') this.initialLives += 0.1;
+  }
+
+  distanceTo(other) {
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  findNearestDot(dots) {
+    let nearest = null, minDist = Infinity;
+    for (const dot of dots) {
+      const d = this.distanceTo(dot);
+      if (d < minDist) { minDist = d; nearest = dot; }
+    }
+    return { dot: nearest, dist: minDist };
+  }
+
+  findNearestBot(bots) {
+    let nearest = null, minDist = Infinity;
+    for (const bot of bots) {
+      if (bot === this) continue;
+      const d = this.distanceTo(bot);
+      if (d < minDist) { minDist = d; nearest = bot; }
+    }
+    return { bot: nearest, dist: minDist };
+  }
+
+  pickNewTarget(bots, dots) {
+    const dotChance = 1 - (this.lives / (this.lives + 3));
+    if (Math.random() < dotChance) {
+      const { dot } = this.findNearestDot(dots);
+      if (dot) { this.targetX = dot.x; this.targetY = dot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    } else {
+      const { bot } = this.findNearestBot(bots);
+      if (bot) { this.targetX = bot.x; this.targetY = bot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    }
+    const m = 100;
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.maxIdle = 60 + Math.random() * 180;
+    this.idleTime = 0;
+  }
+
+  update(bots, dots) {
+    this.lifetime++;
+    if (this.combatCooldown > 0) this.combatCooldown--;
+    if (this.damageTimer > 0) { this.damageTimer--; if (this.damageTimer === 0) { this.justTookDamage = false; this.lastAttacker = null; } }
+    if (this.damageDealtTimer > 0) { this.damageDealtTimer--; if (this.damageDealtTimer === 0) this.justDealtDamage = false; }
+
+    if (this.combatCooldown === 0 && this.lifetime % 30 === 0) {
+      this.pickNewTarget(bots, dots);
+    }
+
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 5) {
+      this.idleTime++;
+      if (this.idleTime > this.maxIdle) this.pickNewTarget(bots, dots);
+    } else {
+      const moveSpeed = 0.5 + this.speed * 0.2;
+      this.x += (dx / dist) * moveSpeed;
+      this.y += (dy / dist) * moveSpeed;
+      this.angle = Math.atan2(dy, dx);
+    }
+
+    this.x = Math.max(20, Math.min(WORLD_WIDTH - 20, this.x));
+    this.y = Math.max(20, Math.min(WORLD_HEIGHT - 20, this.y));
+  }
+}
+
+class GameEngine {
+  constructor(options = {}) {
+    this.botCount = options.botCount || BOT_COUNT;
+    this.dotCount = options.dotCount || DOT_COUNT;
+    this.bots = [];
+    this.dots = [];
+    this.frameCount = 0;
+    this.paused = false;
+    this.events = [];
+    this.playerBot = null;
+    this.followedBot = null;
+    this.followIndex = 0;
+  }
+
+  init() {
+    this.dots = [];
+    for (let i = 0; i < this.dotCount; i++) this.dots.push(new YellowDot());
+
+    this.bots = [];
+    for (let i = 0; i < this.botCount; i++) {
+      const bot = new Bot(i, i === 0);
+      this.bots.push(bot);
+    }
+    this.playerBot = this.bots[0];
+    this.followedBot = this.playerBot;
+    this.followIndex = 0;
+    this.frameCount = 0;
+  }
+
+  cycleFollowedBot() {
+    this.followIndex = (this.followIndex + 1) % this.bots.length;
+    this.followedBot = this.bots[this.followIndex];
+  }
+
+  update() {
+    if (this.paused) return;
+    this.events = [];
+    this.frameCount++;
+
+    for (const bot of this.bots) bot.update(this.bots, this.dots);
+    this._processCollisions();
+  }
+
+  _processCollisions() {
+    for (const bot of this.bots) {
+      for (const dot of this.dots) {
+        const dx = bot.x - dot.x, dy = bot.y - dot.y;
+        if (Math.sqrt(dx * dx + dy * dy) < bot.size + dot.size) {
+          bot.addPartialRandomStat();
+          const oldPos = { x: dot.x, y: dot.y };
+          dot.respawn();
+          this.events.push({ type: 'eat', bot, dotPos: oldPos });
+        }
+      }
+    }
+
+    for (let i = 0; i < this.bots.length; i++) {
+      for (let j = i + 1; j < this.bots.length; j++) {
+        const b1 = this.bots[i], b2 = this.bots[j];
+        const dx = b1.x - b2.x, dy = b1.y - b2.y;
+        if (Math.sqrt(dx * dx + dy * dy) < b1.size + b2.size) {
+          this._handleCombat(b1, b2);
+        }
+      }
+    }
+  }
+
+  _handleCombat(bot1, bot2) {
+    if (bot1.combatCooldown > 0 || bot2.combatCooldown > 0) return;
+
+    let damage1 = bot2.attack - bot1.defence;
+    let damage2 = bot1.attack - bot2.defence;
+
+    if (damage1 <= 0 && damage2 <= 0) {
+      damage1 = bot2.attack / Math.max(bot1.defence, 0.1);
+      damage2 = bot1.attack / Math.max(bot2.defence, 0.1);
+    } else {
+      damage1 = Math.max(0, damage1);
+      damage2 = Math.max(0, damage2);
+    }
+
+    bot1.lives -= damage1;
+    bot2.lives -= damage2;
+
+    if (damage1 > 0) { bot1.justTookDamage = true; bot1.damageTimer = 120; bot1.lastAttacker = bot2; }
+    if (damage2 > 0) { bot2.justTookDamage = true; bot2.damageTimer = 120; bot2.lastAttacker = bot1; }
+    if (damage2 > 0) { bot1.justDealtDamage = true; bot1.damageDealtTimer = 120; }
+    if (damage1 > 0) { bot2.justDealtDamage = true; bot2.damageDealtTimer = 120; }
+
+    bot1.combatCooldown = 60;
+    bot2.combatCooldown = 60;
+
+    this.events.push({ type: 'combat', bot1, bot2, damage1, damage2 });
+
+    const b1Dead = bot1.lives <= 0;
+    const b2Dead = bot2.lives <= 0;
+
+    if (b1Dead && b2Dead) {
+      this._handleDeath(bot1, null);
+      this._handleDeath(bot2, null);
+    } else if (b1Dead) {
+      bot2.killCount++;
+      this._handleDeath(bot1, bot2);
+      bot2.addRandomStat();
+    } else if (b2Dead) {
+      bot1.killCount++;
+      this._handleDeath(bot2, bot1);
+      bot1.addRandomStat();
+    }
+  }
+
+  _handleDeath(bot, killer) {
+    this.events.push({ type: 'death', bot, killer, x: bot.x, y: bot.y });
+    bot.resetStats();
+    bot.spawnAtRandom();
+    this.events.push({ type: 'spawn', bot });
+  }
+}
+
+// ============================================================
+// THREE.JS SCENE — NEON GRID
+// ============================================================
+
+const GRID_SIZE = 100;
+
+function fieldToGrid(fieldX, fieldY) {
+  return {
+    x: (fieldX / WORLD_WIDTH - 0.5) * GRID_SIZE * 2,
+    z: (fieldY / WORLD_HEIGHT - 0.5) * GRID_SIZE * 2
+  };
+}
+
+// State
+let engine, renderer, scene, camera, controls;
+let botMeshes = new Map(); // bot.index -> { group, outer, inner, cone, light, trailPositions[] }
+let dotMeshes = new Map(); // dot index -> { group, gem, beam }
+let cameraMode = 1; // 1=follow, 2=overhead, 3=orbit, 4=ground
+let trailLength = 60;
+let startTime = 0;
+let particleSystem;
+let combatEffects = []; // { lightning, frames }
+let shatterEffects = []; // { fragments[], frames }
+let shockwaveEffects = []; // { ring, frames }
+let gridPulseTime = 0;
+
+// DOM
+const setupScreen = document.getElementById('setup-screen');
+const initBtn = document.getElementById('init-btn');
+const hudEl = document.getElementById('hud');
+const killFeedEl = document.getElementById('kill-feed');
+const camModeEl = document.getElementById('cam-mode');
+const controlsHintEl = document.getElementById('controls-hint');
+
+initBtn.addEventListener('click', startGame);
+
+function startGame() {
+  setupScreen.style.display = 'none';
+  hudEl.style.display = 'block';
+  camModeEl.style.display = 'block';
+  controlsHintEl.style.display = 'block';
+
+  engine = new GameEngine();
+  engine.init();
+  startTime = Date.now();
+
+  initScene();
+  animate();
+}
+
+function initScene() {
+  // Renderer
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  renderer.setClearColor(0x050510);
+  document.body.appendChild(renderer.domElement);
+
+  // Scene
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x050510, 0.005);
+
+  // Camera
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+  camera.position.set(0, 30, 40);
+
+  // Orbit Controls (only active in mode 3)
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.enabled = false;
+
+  // Lighting (minimal — everything is emissive)
+  const ambientLight = new THREE.AmbientLight(0x111122, 0.3);
+  scene.add(ambientLight);
+
+  createGridPlane();
+  createSynthwaveSky();
+  createAmbientParticles();
+  createBotMeshes();
+  createDotMeshes();
+
+  // Input
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('resize', onResize);
+}
+
+// ============================================================
+// GRID PLANE
+// ============================================================
+
+function createGridPlane() {
+  const gridGeo = new THREE.PlaneGeometry(300, 300, 1, 1);
+  const gridMat = new THREE.ShaderMaterial({
+    transparent: true,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uTime: { value: 0 },
+      uPulseTime: { value: -10 },
+      uCamPos: { value: new THREE.Vector3() }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uPulseTime;
+      uniform vec3 uCamPos;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      void main() {
+        vec2 worldXZ = vWorldPos.xz;
+
+        // Distance fade
+        float distFromCam = length(worldXZ - uCamPos.xz);
+        float distFade = 1.0 - smoothstep(40.0, 150.0, distFromCam);
+
+        // Major grid lines (every 10 units)
+        vec2 majorGrid = abs(fract(worldXZ / 10.0) - 0.5);
+        float majorLine = 1.0 - smoothstep(0.0, 0.04, min(majorGrid.x, majorGrid.y));
+
+        // Minor grid lines (every 2 units)
+        vec2 minorGrid = abs(fract(worldXZ / 2.0) - 0.5);
+        float minorLine = 1.0 - smoothstep(0.0, 0.03, min(minorGrid.x, minorGrid.y));
+
+        float alpha = (majorLine * 0.4 + minorLine * 0.15) * distFade;
+
+        // Pulse ring
+        float pulseElapsed = uTime - uPulseTime;
+        if (pulseElapsed < 3.0 && pulseElapsed > 0.0) {
+          float ringRadius = pulseElapsed * 40.0;
+          float distFromCenter = length(worldXZ);
+          float ringDist = abs(distFromCenter - ringRadius);
+          float ring = 1.0 - smoothstep(0.0, 1.5, ringDist);
+          float ringFade = 1.0 - pulseElapsed / 3.0;
+          alpha += ring * ringFade * 0.5;
+        }
+
+        vec3 cyanColor = vec3(0.0, 1.0, 1.0);
+        gl_FragColor = vec4(cyanColor, alpha);
+      }
+    `
+  });
+
+  const gridMesh = new THREE.Mesh(gridGeo, gridMat);
+  gridMesh.rotation.x = -Math.PI / 2;
+  gridMesh.position.y = 0;
+  gridMesh.renderOrder = -1;
+  scene.add(gridMesh);
+  scene.gridMaterial = gridMat;
+
+  // Boundary lines — subtle cyan outline at the playable area edge
+  const boundaryGeo = new THREE.BufferGeometry();
+  const half = GRID_SIZE;
+  const bVerts = new Float32Array([
+    -half, 0.05, -half,
+     half, 0.05, -half,
+     half, 0.05,  half,
+    -half, 0.05,  half,
+    -half, 0.05, -half
+  ]);
+  boundaryGeo.setAttribute('position', new THREE.BufferAttribute(bVerts, 3));
+  const boundaryMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 });
+  const boundaryLine = new THREE.Line(boundaryGeo, boundaryMat);
+  scene.add(boundaryLine);
+}
+
+// ============================================================
+// SYNTHWAVE SKY
+// ============================================================
+
+function createSynthwaveSky() {
+  // Sky sphere with gradient
+  const skyGeo = new THREE.SphereGeometry(200, 32, 32);
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: {},
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        float height = normalize(vWorldPosition).y;
+
+        // Gradient from bottom (horizon) to top
+        vec3 deepPurple = vec3(0.02, 0.02, 0.063);
+        vec3 hotPink = vec3(1.0, 0.0, 0.667);
+        vec3 orange = vec3(1.0, 0.4, 0.0);
+        vec3 gold = vec3(1.0, 0.8, 0.0);
+
+        vec3 col;
+        if (height > 0.3) {
+          col = deepPurple;
+        } else if (height > 0.15) {
+          float t = (height - 0.15) / 0.15;
+          col = mix(hotPink, deepPurple, t);
+        } else if (height > 0.05) {
+          float t = (height - 0.05) / 0.1;
+          col = mix(orange, hotPink, t);
+        } else if (height > -0.02) {
+          float t = (height + 0.02) / 0.07;
+          col = mix(gold, orange, t);
+        } else {
+          col = deepPurple * 0.5;
+        }
+
+        // Dim overall
+        col *= 0.6;
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `
+  });
+  const sky = new THREE.Mesh(skyGeo, skyMat);
+  scene.add(sky);
+
+  // Synthwave sun — emissive disc at horizon
+  const sunGeo = new THREE.CircleGeometry(25, 64);
+  const sunMat = new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    uniforms: {},
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      void main() {
+        vec2 centered = vUv - 0.5;
+
+        // Only show top half (sun at horizon)
+        if (centered.y < -0.02) discard;
+
+        float dist = length(centered) * 2.0;
+        if (dist > 1.0) discard;
+
+        // Sun gradient: bright yellow center fading to orange/pink at edges
+        vec3 center = vec3(1.0, 0.95, 0.5);
+        vec3 edge = vec3(1.0, 0.2, 0.4);
+        vec3 col = mix(center, edge, dist);
+
+        // Horizontal scan lines
+        float scanLine = step(0.5, fract(centered.y * 30.0));
+        col *= 0.6 + 0.4 * scanLine;
+
+        float alpha = 1.0 - smoothstep(0.85, 1.0, dist);
+        gl_FragColor = vec4(col, alpha);
+      }
+    `
+  });
+  const sun = new THREE.Mesh(sunGeo, sunMat);
+  sun.position.set(0, 5, -180);
+  scene.add(sun);
+}
+
+// ============================================================
+// AMBIENT PARTICLES
+// ============================================================
+
+function createAmbientParticles() {
+  const count = 200;
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 200;
+    positions[i * 3 + 1] = Math.random() * 40;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+  }
+
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const pMat = new THREE.PointsMaterial({
+    color: 0x00ffff,
+    size: 0.3,
+    transparent: true,
+    opacity: 0.4,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+
+  particleSystem = new THREE.Points(pGeo, pMat);
+  scene.add(particleSystem);
+}
+
+// ============================================================
+// BOT MESHES
+// ============================================================
+
+function createBotMeshes() {
+  for (const bot of engine.bots) {
+    createBotMesh(bot);
+  }
+}
+
+function createBotMesh(bot) {
+  const group = new THREE.Group();
+
+  const radius = 1.5 + bot.totalStats * 0.04;
+  const color = new THREE.Color(bot.colorHex);
+  const emissiveIntensity = bot.isPlayer ? 0.9 : 0.6;
+
+  // Outer icosahedron
+  const outerGeo = new THREE.IcosahedronGeometry(radius, 0);
+  const outerMat = new THREE.MeshStandardMaterial({
+    color: color,
+    emissive: color,
+    emissiveIntensity: emissiveIntensity,
+    metalness: 0.8,
+    roughness: 0.1,
+    flatShading: true
+  });
+  const outer = new THREE.Mesh(outerGeo, outerMat);
+  group.add(outer);
+
+  // Inner core
+  const innerGeo = new THREE.IcosahedronGeometry(radius * 0.6, 1);
+  const innerMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.3
+  });
+  const inner = new THREE.Mesh(innerGeo, innerMat);
+  group.add(inner);
+
+  // Direction cone
+  const coneGeo = new THREE.ConeGeometry(0.4, 1.2, 4);
+  const coneMat = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0.8
+  });
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.rotation.z = -Math.PI / 2; // Point along +x
+  cone.position.x = radius + 0.8;
+  group.add(cone);
+
+  // Point light (positioned below bot)
+  const light = new THREE.PointLight(bot.colorHex, 0.5, 15);
+  light.position.y = -1.5;
+  group.add(light);
+
+  const pos = fieldToGrid(bot.x, bot.y);
+  group.position.set(pos.x, 2, pos.z);
+
+  scene.add(group);
+
+  botMeshes.set(bot.index, {
+    group,
+    outer,
+    inner,
+    cone,
+    light,
+    outerMat,
+    trailPositions: [],
+    trailLine: null,
+    spinSpeed: 0.005 + Math.random() * 0.01
+  });
+}
+
+// ============================================================
+// DOT MESHES
+// ============================================================
+
+function createDotMeshes() {
+  for (let i = 0; i < engine.dots.length; i++) {
+    createDotMesh(i, engine.dots[i]);
+  }
+}
+
+function createDotMesh(index, dot) {
+  const group = new THREE.Group();
+
+  // Octahedron gem
+  const gemGeo = new THREE.OctahedronGeometry(0.6, 0);
+  const gemMat = new THREE.MeshStandardMaterial({
+    color: 0xffaa00,
+    emissive: 0xffaa00,
+    emissiveIntensity: 1.0,
+    metalness: 0.5,
+    roughness: 0.2,
+    flatShading: true
+  });
+  const gem = new THREE.Mesh(gemGeo, gemMat);
+  group.add(gem);
+
+  // Vertical beam
+  const beamGeo = new THREE.CylinderGeometry(0.1, 0.1, 6, 4);
+  const beamMat = new THREE.MeshBasicMaterial({
+    color: 0xffaa00,
+    transparent: true,
+    opacity: 0.15,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const beam = new THREE.Mesh(beamGeo, beamMat);
+  beam.position.y = 1.5; // offset upward from dot
+  group.add(beam);
+
+  const pos = fieldToGrid(dot.x, dot.y);
+  group.position.set(pos.x, 1.5, pos.z);
+  scene.add(group);
+
+  dotMeshes.set(index, { group, gem, beam });
+}
+
+// ============================================================
+// LIGHT TRAILS
+// ============================================================
+
+function updateTrails() {
+  for (const bot of engine.bots) {
+    const data = botMeshes.get(bot.index);
+    if (!data) continue;
+
+    const pos = fieldToGrid(bot.x, bot.y);
+    data.trailPositions.push({ x: pos.x, z: pos.z });
+
+    if (data.trailPositions.length > trailLength) {
+      data.trailPositions.shift();
+    }
+
+    // Remove old trail line
+    if (data.trailLine) {
+      scene.remove(data.trailLine);
+      data.trailLine.geometry.dispose();
+      data.trailLine.material.dispose();
+    }
+
+    if (data.trailPositions.length < 2) continue;
+
+    const positions = [];
+    const colors = [];
+    const color = new THREE.Color(bot.colorHex);
+
+    for (let i = 0; i < data.trailPositions.length; i++) {
+      const p = data.trailPositions[i];
+      positions.push(p.x, 0.05, p.z);
+
+      const t = i / (data.trailPositions.length - 1);
+      colors.push(color.r * t, color.g * t, color.b * t);
+    }
+
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trailGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const trailMat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    scene.add(trailLine);
+    data.trailLine = trailLine;
+  }
+}
+
+// ============================================================
+// COMBAT EFFECTS
+// ============================================================
+
+function createArcLightning(bot1, bot2) {
+  const p1 = fieldToGrid(bot1.x, bot1.y);
+  const p2 = fieldToGrid(bot2.x, bot2.y);
+
+  const segments = 5;
+  const positions = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const x = p1.x + (p2.x - p1.x) * t;
+    const z = p1.z + (p2.z - p1.z) * t;
+    const y = 2;
+
+    if (i > 0 && i < segments) {
+      const perpX = -(p2.z - p1.z);
+      const perpZ = (p2.x - p1.x);
+      const len = Math.sqrt(perpX * perpX + perpZ * perpZ) || 1;
+      const offset = (Math.random() - 0.5) * 3;
+      positions.push(x + (perpX / len) * offset, y + (Math.random() - 0.5) * 2, z + (perpZ / len) * offset);
+    } else {
+      positions.push(x, y, z);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const mat = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1.0,
+    blending: THREE.AdditiveBlending,
+    linewidth: 2
+  });
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  combatEffects.push({ line, frames: 5 });
+}
+
+function createShatterEffect(bot) {
+  const pos = fieldToGrid(bot.x, bot.y);
+  const color = new THREE.Color(bot.colorHex);
+  const fragments = [];
+
+  for (let i = 0; i < 20; i++) {
+    const fragGeo = new THREE.TetrahedronGeometry(0.3 + Math.random() * 0.3, 0);
+    const fragMat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending
+    });
+    const frag = new THREE.Mesh(fragGeo, fragMat);
+    frag.position.set(pos.x, 2, pos.z);
+
+    // Random velocity
+    frag.userData.vx = (Math.random() - 0.5) * 1.5;
+    frag.userData.vy = Math.random() * 1.0 + 0.5;
+    frag.userData.vz = (Math.random() - 0.5) * 1.5;
+    frag.userData.rotSpeed = (Math.random() - 0.5) * 0.3;
+
+    scene.add(frag);
+    fragments.push(frag);
+  }
+
+  shatterEffects.push({ fragments, frames: 30 });
+}
+
+function createShockwave(x, y) {
+  const pos = fieldToGrid(x, y);
+  const ringGeo = new THREE.RingGeometry(0.5, 1.0, 32);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x00ffff,
+    transparent: true,
+    opacity: 0.8,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(pos.x, 0.1, pos.z);
+  scene.add(ring);
+  shockwaveEffects.push({ ring, frames: 30, maxFrames: 30 });
+}
+
+function updateEffects() {
+  // Lightning
+  for (let i = combatEffects.length - 1; i >= 0; i--) {
+    combatEffects[i].frames--;
+    if (combatEffects[i].frames <= 0) {
+      scene.remove(combatEffects[i].line);
+      combatEffects[i].line.geometry.dispose();
+      combatEffects[i].line.material.dispose();
+      combatEffects.splice(i, 1);
+    }
+  }
+
+  // Shatter fragments
+  for (let i = shatterEffects.length - 1; i >= 0; i--) {
+    const se = shatterEffects[i];
+    se.frames--;
+    const t = se.frames / 30;
+    for (const frag of se.fragments) {
+      frag.position.x += frag.userData.vx;
+      frag.position.y += frag.userData.vy;
+      frag.position.z += frag.userData.vz;
+      frag.userData.vy -= 0.03; // gravity
+      frag.rotation.x += frag.userData.rotSpeed;
+      frag.rotation.z += frag.userData.rotSpeed * 0.7;
+      frag.material.opacity = Math.max(0, t);
+    }
+    if (se.frames <= 0) {
+      for (const frag of se.fragments) {
+        scene.remove(frag);
+        frag.geometry.dispose();
+        frag.material.dispose();
+      }
+      shatterEffects.splice(i, 1);
+    }
+  }
+
+  // Shockwaves
+  for (let i = shockwaveEffects.length - 1; i >= 0; i--) {
+    const sw = shockwaveEffects[i];
+    sw.frames--;
+    const progress = 1 - sw.frames / sw.maxFrames;
+    const scale = 1 + progress * 15;
+    sw.ring.scale.set(scale, scale, 1);
+    sw.ring.material.opacity = 0.8 * (1 - progress);
+    if (sw.frames <= 0) {
+      scene.remove(sw.ring);
+      sw.ring.geometry.dispose();
+      sw.ring.material.dispose();
+      shockwaveEffects.splice(i, 1);
+    }
+  }
+}
+
+// ============================================================
+// PROCESS EVENTS
+// ============================================================
+
+function processEvents() {
+  for (const event of engine.events) {
+    if (event.type === 'combat') {
+      createArcLightning(event.bot1, event.bot2);
+    }
+    if (event.type === 'death') {
+      createShatterEffect(event.bot);
+      createShockwave(event.x, event.y);
+
+      // Kill feed message
+      const killerLabel = event.killer ? `Bot#${event.killer.index}` : 'mutual';
+      const botLabel = event.bot.isPlayer ? 'PLAYER' : `Bot#${event.bot.index}`;
+      const msg = document.createElement('div');
+      msg.className = 'kill-msg';
+      const deadColor = `#${event.bot.colorHex.toString(16).padStart(6, '0')}`;
+      msg.style.color = deadColor;
+      if (event.killer) {
+        msg.textContent = `\u25C8 ${killerLabel} ELIMINATED ${botLabel}`;
+      } else {
+        msg.textContent = `\u25C8 ${botLabel} DESTROYED`;
+      }
+      killFeedEl.appendChild(msg);
+      requestAnimationFrame(() => msg.classList.add('fade'));
+      setTimeout(() => msg.remove(), 2500);
+    }
+    if (event.type === 'spawn') {
+      // Reset trail on respawn
+      const data = botMeshes.get(event.bot.index);
+      if (data) data.trailPositions = [];
+    }
+  }
+}
+
+// ============================================================
+// UPDATE LOOP
+// ============================================================
+
+function updateBotMeshes(time) {
+  // Sort bots by distance to camera for PointLight optimization
+  const camPos = camera.position.clone();
+  const botsWithDist = engine.bots.map(bot => {
+    const pos = fieldToGrid(bot.x, bot.y);
+    const dx = pos.x - camPos.x;
+    const dz = pos.z - camPos.z;
+    return { bot, dist: dx * dx + dz * dz };
+  });
+  botsWithDist.sort((a, b) => a.dist - b.dist);
+  const nearestBotIndices = new Set(botsWithDist.slice(0, 10).map(b => b.bot.index));
+
+  for (const bot of engine.bots) {
+    const data = botMeshes.get(bot.index);
+    if (!data) continue;
+
+    const pos = fieldToGrid(bot.x, bot.y);
+    const bob = Math.sin(time * 2 + bot.index) * 0.3;
+    data.group.position.set(pos.x, 2 + bob, pos.z);
+
+    // Rotation
+    data.outer.rotation.y += data.spinSpeed;
+    data.inner.rotation.y -= data.spinSpeed * 1.5;
+
+    // Direction cone — face heading direction
+    // bot.angle is atan2(dy, dx) — in field space, dx -> x, dy -> z in scene
+    data.cone.position.set(0, 0, 0);
+    data.group.rotation.y = -bot.angle + Math.PI / 2;
+
+    // Update cone position to be in front
+    const radius = 1.5 + bot.totalStats * 0.04;
+    data.cone.position.set(0, 0, -(radius + 0.8));
+    data.cone.rotation.set(Math.PI, 0, 0);
+
+    // Update size
+    const newRadius = 1.5 + bot.totalStats * 0.04;
+    data.outer.scale.setScalar(newRadius / (1.5 + 18 * 0.04)); // relative to initial
+    data.inner.scale.setScalar(newRadius / (1.5 + 18 * 0.04));
+
+    // Update color (hue can change on respawn for non-player bots — actually it doesn't, but emissive intensity changes on damage)
+    const emissiveIntensity = bot.isPlayer ? 0.9 : 0.6;
+    const damageFlash = (bot.justTookDamage && Math.floor(time * 20) % 2 === 0) ? 1.5 : emissiveIntensity;
+    data.outerMat.emissiveIntensity = damageFlash;
+
+    // PointLight: only for nearest 10
+    data.light.visible = nearestBotIndices.has(bot.index);
+  }
+}
+
+function updateDotMeshes(time) {
+  for (let i = 0; i < engine.dots.length; i++) {
+    const dot = engine.dots[i];
+    const data = dotMeshes.get(i);
+    if (!data) continue;
+
+    const pos = fieldToGrid(dot.x, dot.y);
+    const bob = Math.sin(time * 3 + i * 0.5) * 0.2;
+    data.group.position.set(pos.x, 1.5 + bob, pos.z);
+    data.gem.rotation.y += 0.015;
+  }
+}
+
+function updateCamera(time) {
+  const followed = engine.followedBot;
+  if (!followed) return;
+
+  const target = fieldToGrid(followed.x, followed.y);
+
+  if (cameraMode === 1) {
+    // Follow cam — behind and above
+    controls.enabled = false;
+    const offset = new THREE.Vector3(0, 30, 40);
+    const desiredPos = new THREE.Vector3(target.x + offset.x, offset.y, target.z + offset.z);
+    camera.position.lerp(desiredPos, 0.03);
+    const lookTarget = new THREE.Vector3(target.x, 2, target.z);
+    const currentLookAt = new THREE.Vector3();
+    camera.getWorldDirection(currentLookAt);
+    camera.lookAt(lookTarget);
+  } else if (cameraMode === 2) {
+    // Overhead
+    controls.enabled = false;
+    const desiredPos = new THREE.Vector3(0, 120, 0.1);
+    camera.position.lerp(desiredPos, 0.03);
+    camera.lookAt(0, 0, 0);
+  } else if (cameraMode === 3) {
+    // Free orbit
+    controls.enabled = true;
+    controls.update();
+  } else if (cameraMode === 4) {
+    // Ground level
+    controls.enabled = false;
+    const angle = -followed.angle + Math.PI / 2;
+    const behindX = target.x + Math.sin(angle) * 10;
+    const behindZ = target.z + Math.cos(angle) * 10;
+    const desiredPos = new THREE.Vector3(behindX, 1.5, behindZ);
+    camera.position.lerp(desiredPos, 0.03);
+    camera.lookAt(target.x, 2, target.z);
+  }
+}
+
+function updateParticles(time) {
+  const positions = particleSystem.geometry.attributes.position.array;
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i + 1] += 0.02; // drift up
+    if (positions[i + 1] > 40) {
+      positions[i + 1] = 0;
+      positions[i] = (Math.random() - 0.5) * 200;
+      positions[i + 2] = (Math.random() - 0.5) * 200;
+    }
+  }
+  particleSystem.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateHUD() {
+  const bot = engine.followedBot;
+  if (!bot) return;
+
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = (elapsed % 60).toString().padStart(2, '0');
+
+  const label = bot.isPlayer ? 'PLAYER' : `Bot#${bot.index}`;
+  const aliveBots = engine.bots.length;
+
+  hudEl.textContent = `\u25C8 ${label} | SPD ${bot.speed.toFixed(1)}  ATK ${bot.attack.toFixed(1)}  DEF ${bot.defence.toFixed(1)}  LIV ${bot.lives.toFixed(1)} | KILLS: ${bot.killCount} | POP: ${aliveBots}/${BOT_COUNT} | \u23F1 ${mins}:${secs}`;
+}
+
+function updateGridPulse(time) {
+  const mat = scene.gridMaterial;
+  if (!mat) return;
+  mat.uniforms.uTime.value = time;
+  mat.uniforms.uCamPos.value.copy(camera.position);
+
+  // Pulse every 3 seconds
+  if (time - gridPulseTime > 3.0) {
+    mat.uniforms.uPulseTime.value = time;
+    gridPulseTime = time;
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+
+const camModeNames = ['', 'FOLLOW CAM', 'OVERHEAD', 'FREE ORBIT', 'GROUND LEVEL'];
+
+function handleKeyDown(e) {
+  if (e.key === '1') { cameraMode = 1; controls.enabled = false; camModeEl.textContent = camModeNames[1]; }
+  if (e.key === '2') { cameraMode = 2; controls.enabled = false; camModeEl.textContent = camModeNames[2]; }
+  if (e.key === '3') { cameraMode = 3; controls.enabled = true; camModeEl.textContent = camModeNames[3]; }
+  if (e.key === '4') { cameraMode = 4; controls.enabled = false; camModeEl.textContent = camModeNames[4]; }
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    engine.cycleFollowedBot();
+  }
+
+  if (e.key === ' ') {
+    e.preventDefault();
+    engine.paused = !engine.paused;
+  }
+
+  if (e.key === 't' || e.key === 'T') {
+    if (trailLength === 30) trailLength = 60;
+    else if (trailLength === 60) trailLength = 120;
+    else trailLength = 30;
+    // Trim existing trails
+    for (const [, data] of botMeshes) {
+      if (data.trailPositions.length > trailLength) {
+        data.trailPositions = data.trailPositions.slice(-trailLength);
+      }
+    }
+  }
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ============================================================
+// ANIMATION LOOP
+// ============================================================
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  engine.update();
+
+  const time = performance.now() * 0.001;
+
+  processEvents();
+  updateBotMeshes(time);
+  updateDotMeshes(time);
+  updateTrails();
+  updateCamera(time);
+  updateParticles(time);
+  updateEffects();
+  updateGridPulse(time);
+  updateHUD();
+
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>

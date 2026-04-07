@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>War Table - Bots in a Field</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+  canvas { display: block; }
+
+  /* Setup Screen */
+  #setup-screen {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #0a0a18 0%, #000005 100%);
+  }
+  #setup-screen h1 {
+    font-size: 3rem; letter-spacing: 1.2rem; color: #00ccff;
+    text-shadow: 0 0 20px #00ccff88, 0 0 60px #00448844;
+    margin-bottom: 0.5rem;
+    animation: titlePulse 3s ease-in-out infinite;
+  }
+  #setup-screen .subtitle {
+    font-size: 0.85rem; letter-spacing: 0.5rem; color: #006688;
+    margin-bottom: 3rem;
+  }
+  #setup-screen button {
+    font-family: 'Courier New', monospace; font-size: 1.1rem;
+    padding: 14px 48px; background: transparent;
+    color: #00ccff; border: 1px solid #00ccff44;
+    cursor: pointer; letter-spacing: 0.3rem;
+    transition: all 0.3s;
+    text-transform: uppercase;
+  }
+  #setup-screen button:hover {
+    background: #00ccff15; border-color: #00ccff;
+    box-shadow: 0 0 30px #00ccff33, inset 0 0 30px #00ccff11;
+  }
+  @keyframes titlePulse {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 1; }
+  }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    padding: 10px 20px;
+    font-size: 14px; color: #00ccff;
+    text-shadow: 0 0 8px #00ccff66;
+    background: linear-gradient(180deg, rgba(0,10,20,0.85) 0%, rgba(0,10,20,0) 100%);
+    display: none;
+    pointer-events: none;
+  }
+  #hud .hud-bar {
+    background: rgba(0,20,40,0.6);
+    padding: 8px 16px;
+    border: 1px solid #00ccff22;
+    display: inline-block;
+    position: relative;
+    overflow: hidden;
+  }
+  #hud .hud-bar::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 2px,
+      rgba(0,204,255,0.03) 2px,
+      rgba(0,204,255,0.03) 4px
+    );
+    pointer-events: none;
+  }
+
+  /* Controls hint */
+  #controls-hint {
+    position: fixed; bottom: 12px; right: 16px; z-index: 10;
+    font-size: 11px; color: #00668888;
+    display: none; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="setup-screen">
+  <h1>WAR TABLE</h1>
+  <div class="subtitle">TACTICAL COMMAND &mdash; BOTS IN A FIELD</div>
+  <button id="activate-btn">ACTIVATE HOLOGRAM</button>
+</div>
+
+<div id="hud"><span class="hud-bar" id="hud-text"></span></div>
+<div id="controls-hint">DRAG orbit | SCROLL zoom | TAB select | K kills | SPACE pause | ESC reset</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+// ============================================================
+// GAME ENGINE (from shared/game-engine.js)
+// ============================================================
+const WORLD_WIDTH = 2000;
+const WORLD_HEIGHT = 2000;
+const BOT_COUNT = 20;
+const DOT_COUNT = 50;
+const STARTING_STATS = { speed: 5, attack: 5, defence: 5, lives: 3 };
+const TOTAL_POINTS = 18;
+
+class YellowDot {
+  constructor() {
+    this.size = 6;
+    this.respawn();
+  }
+  respawn() {
+    const m = 50;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+  }
+}
+
+class Bot {
+  constructor(index, isPlayer = false) {
+    this.index = index;
+    this.isPlayer = isPlayer;
+    this.size = 10 + Math.random() * 6;
+    this.hue = isPlayer ? 200 : Math.random() * 360;
+    this.color = `hsl(${this.hue}, 70%, 50%)`;
+    this.colorHex = this._hslToHex(this.hue, 70, 50);
+    this.killCount = 0;
+    this.combatCooldown = 0;
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.angle = 0;
+    this.lifetime = 0;
+    this.justTookDamage = false;
+    this.justDealtDamage = false;
+    this.damageTimer = 0;
+    this.damageDealtTimer = 0;
+    this.lastAttacker = null;
+
+    this.speed = STARTING_STATS.speed;
+    this.attack = STARTING_STATS.attack;
+    this.defence = STARTING_STATS.defence;
+    this.lives = STARTING_STATS.lives;
+    this.initialLives = this.lives;
+
+    this.spawnAtRandom();
+  }
+
+  _hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); };
+    return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8) | Math.round(f(4) * 255);
+  }
+
+  get totalStats() { return this.speed + this.attack + this.defence + this.lives; }
+
+  spawnAtRandom() {
+    const m = 100;
+    this.x = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.y = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.idleTime = 0;
+    this.maxIdle = 60 + Math.random() * 120;
+    this.combatCooldown = 0;
+  }
+
+  resetStats() {
+    this.speed = STARTING_STATS.speed;
+    this.attack = STARTING_STATS.attack;
+    this.defence = STARTING_STATS.defence;
+    this.lives = STARTING_STATS.lives;
+    this.initialLives = this.lives;
+  }
+
+  addRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat]++;
+    if (stat === 'lives') this.initialLives++;
+  }
+
+  addPartialRandomStat() {
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    this[stat] += 0.1;
+    if (stat === 'lives') this.initialLives += 0.1;
+  }
+
+  distanceTo(other) {
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  findNearestDot(dots) {
+    let nearest = null, minDist = Infinity;
+    for (const dot of dots) {
+      const d = this.distanceTo(dot);
+      if (d < minDist) { minDist = d; nearest = dot; }
+    }
+    return { dot: nearest, dist: minDist };
+  }
+
+  findNearestBot(bots) {
+    let nearest = null, minDist = Infinity;
+    for (const bot of bots) {
+      if (bot === this) continue;
+      const d = this.distanceTo(bot);
+      if (d < minDist) { minDist = d; nearest = bot; }
+    }
+    return { bot: nearest, dist: minDist };
+  }
+
+  pickNewTarget(bots, dots) {
+    const dotChance = 1 - (this.lives / (this.lives + 3));
+    if (Math.random() < dotChance) {
+      const { dot } = this.findNearestDot(dots);
+      if (dot) { this.targetX = dot.x; this.targetY = dot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    } else {
+      const { bot } = this.findNearestBot(bots);
+      if (bot) { this.targetX = bot.x; this.targetY = bot.y; this.maxIdle = 30 + Math.random() * 60; this.idleTime = 0; return; }
+    }
+    const m = 100;
+    this.targetX = m + Math.random() * (WORLD_WIDTH - m * 2);
+    this.targetY = m + Math.random() * (WORLD_HEIGHT - m * 2);
+    this.maxIdle = 60 + Math.random() * 180;
+    this.idleTime = 0;
+  }
+
+  update(bots, dots) {
+    this.lifetime++;
+    if (this.combatCooldown > 0) this.combatCooldown--;
+    if (this.damageTimer > 0) { this.damageTimer--; if (this.damageTimer === 0) { this.justTookDamage = false; this.lastAttacker = null; } }
+    if (this.damageDealtTimer > 0) { this.damageDealtTimer--; if (this.damageDealtTimer === 0) this.justDealtDamage = false; }
+
+    if (this.combatCooldown === 0 && this.lifetime % 30 === 0) {
+      this.pickNewTarget(bots, dots);
+    }
+
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 5) {
+      this.idleTime++;
+      if (this.idleTime > this.maxIdle) this.pickNewTarget(bots, dots);
+    } else {
+      const moveSpeed = 0.5 + this.speed * 0.2;
+      this.x += (dx / dist) * moveSpeed;
+      this.y += (dy / dist) * moveSpeed;
+      this.angle = Math.atan2(dy, dx);
+    }
+
+    this.x = Math.max(20, Math.min(WORLD_WIDTH - 20, this.x));
+    this.y = Math.max(20, Math.min(WORLD_HEIGHT - 20, this.y));
+  }
+}
+
+class GameEngine {
+  constructor(options = {}) {
+    this.botCount = options.botCount || BOT_COUNT;
+    this.dotCount = options.dotCount || DOT_COUNT;
+    this.bots = [];
+    this.dots = [];
+    this.frameCount = 0;
+    this.paused = false;
+    this.events = [];
+    this.playerBot = null;
+    this.followedBot = null;
+    this.followIndex = 0;
+  }
+
+  init() {
+    this.dots = [];
+    for (let i = 0; i < this.dotCount; i++) this.dots.push(new YellowDot());
+
+    this.bots = [];
+    for (let i = 0; i < this.botCount; i++) {
+      const bot = new Bot(i, i === 0);
+      this.bots.push(bot);
+    }
+    this.playerBot = this.bots[0];
+    this.followedBot = this.playerBot;
+    this.followIndex = 0;
+    this.frameCount = 0;
+  }
+
+  cycleFollowedBot() {
+    this.followIndex = (this.followIndex + 1) % this.bots.length;
+    this.followedBot = this.bots[this.followIndex];
+  }
+
+  update() {
+    if (this.paused) return;
+    this.events = [];
+    this.frameCount++;
+
+    for (const bot of this.bots) bot.update(this.bots, this.dots);
+    this._processCollisions();
+  }
+
+  _processCollisions() {
+    for (const bot of this.bots) {
+      for (const dot of this.dots) {
+        const dx = bot.x - dot.x, dy = bot.y - dot.y;
+        if (Math.sqrt(dx * dx + dy * dy) < bot.size + dot.size) {
+          bot.addPartialRandomStat();
+          const oldPos = { x: dot.x, y: dot.y };
+          dot.respawn();
+          this.events.push({ type: 'eat', bot, dotPos: oldPos });
+        }
+      }
+    }
+
+    for (let i = 0; i < this.bots.length; i++) {
+      for (let j = i + 1; j < this.bots.length; j++) {
+        const b1 = this.bots[i], b2 = this.bots[j];
+        const dx = b1.x - b2.x, dy = b1.y - b2.y;
+        if (Math.sqrt(dx * dx + dy * dy) < b1.size + b2.size) {
+          this._handleCombat(b1, b2);
+        }
+      }
+    }
+  }
+
+  _handleCombat(bot1, bot2) {
+    if (bot1.combatCooldown > 0 || bot2.combatCooldown > 0) return;
+
+    let damage1 = bot2.attack - bot1.defence;
+    let damage2 = bot1.attack - bot2.defence;
+
+    if (damage1 <= 0 && damage2 <= 0) {
+      damage1 = bot2.attack / Math.max(bot1.defence, 0.1);
+      damage2 = bot1.attack / Math.max(bot2.defence, 0.1);
+    } else {
+      damage1 = Math.max(0, damage1);
+      damage2 = Math.max(0, damage2);
+    }
+
+    bot1.lives -= damage1;
+    bot2.lives -= damage2;
+
+    if (damage1 > 0) { bot1.justTookDamage = true; bot1.damageTimer = 120; bot1.lastAttacker = bot2; }
+    if (damage2 > 0) { bot2.justTookDamage = true; bot2.damageTimer = 120; bot2.lastAttacker = bot1; }
+    if (damage2 > 0) { bot1.justDealtDamage = true; bot1.damageDealtTimer = 120; }
+    if (damage1 > 0) { bot2.justDealtDamage = true; bot2.damageDealtTimer = 120; }
+
+    bot1.combatCooldown = 60;
+    bot2.combatCooldown = 60;
+
+    this.events.push({ type: 'combat', bot1, bot2, damage1, damage2 });
+
+    const b1Dead = bot1.lives <= 0;
+    const b2Dead = bot2.lives <= 0;
+
+    if (b1Dead && b2Dead) {
+      this._handleDeath(bot1, null);
+      this._handleDeath(bot2, null);
+    } else if (b1Dead) {
+      bot2.killCount++;
+      this._handleDeath(bot1, bot2);
+      bot2.addRandomStat();
+    } else if (b2Dead) {
+      bot1.killCount++;
+      this._handleDeath(bot2, bot1);
+      bot1.addRandomStat();
+    }
+  }
+
+  _handleDeath(bot, killer) {
+    this.events.push({ type: 'death', bot, killer, x: bot.x, y: bot.y });
+    bot.resetStats();
+    bot.spawnAtRandom();
+    this.events.push({ type: 'spawn', bot });
+  }
+}
+
+// ============================================================
+// THREE.JS WAR TABLE SCENE
+// ============================================================
+(function() {
+
+  // --- Constants ---
+  const TABLE_W = 60;
+  const TABLE_D = 40;
+  const TABLE_H = 2;
+  const TABLE_TOP = TABLE_H / 2;
+  const TABLE_FIELD_W = 50;
+  const TABLE_FIELD_D = 35;
+  const UNIT_BEAM_H = 1.0; // beam geometry created with height=1, scaled at runtime
+
+  function fieldToTable(fieldX, fieldY) {
+    return {
+      x: (fieldX / WORLD_WIDTH - 0.5) * TABLE_FIELD_W,
+      z: (fieldY / WORLD_HEIGHT - 0.5) * TABLE_FIELD_D
+    };
+  }
+
+  // --- Globals ---
+  let scene, camera, renderer, controls;
+  let engine;
+  let botGroups = [];
+  let foodMeshes = [];
+  let combatArcs = [];
+  let killMarkers = [];
+  let showKillMarkers = true;
+  let killMarkerGroup;
+  let ledGreen, ledRed, ledBlue, ledYellow;
+  let holoBaseMat;
+  let started = false;
+  let materializeProgress = 0;
+  let startTime = 0;
+  let combatActive = false;
+  let killEventTimer = 0;
+  let deathFlashes = [];
+
+  const DEFAULT_CAM_POS = new THREE.Vector3(0, 40, 30);
+  const DEFAULT_CAM_TARGET = new THREE.Vector3(0, 2, 0);
+
+  // --- Init ---
+  function init() {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000005);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x000008, 0.004);
+
+    camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 500);
+    camera.position.copy(DEFAULT_CAM_POS);
+    camera.lookAt(DEFAULT_CAM_TARGET);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.copy(DEFAULT_CAM_TARGET);
+    controls.enablePan = false;
+    controls.minDistance = 20;
+    controls.maxDistance = 80;
+    controls.minPolarAngle = Math.PI * 0.1;
+    controls.maxPolarAngle = Math.PI * 0.45;
+    controls.minAzimuthAngle = -Math.PI * 0.5;
+    controls.maxAzimuthAngle = Math.PI * 0.5;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    buildRoom();
+    buildTable();
+    buildControlPanel();
+    buildProjector();
+    buildHologramBase();
+    buildKillMarkerGroup();
+
+    engine = new GameEngine();
+    engine.init();
+
+    buildBotHolograms();
+    buildFoodHolograms();
+
+    window.addEventListener('resize', onResize);
+    window.addEventListener('keydown', onKeyDown);
+    document.getElementById('activate-btn').addEventListener('click', startGame);
+  }
+
+  // --- Room ---
+  function buildRoom() {
+    const floorGeo = new THREE.PlaneGeometry(200, 200);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a12, roughness: 0.95, metalness: 0.1
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -10;
+    scene.add(floor);
+
+    const wallGeo = new THREE.PlaneGeometry(100, 40);
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a15, roughness: 0.9
+    });
+    const wall = new THREE.Mesh(wallGeo, wallMat);
+    wall.position.set(0, 10, -30);
+    scene.add(wall);
+
+    const ambient = new THREE.AmbientLight(0x222233, 0.15);
+    scene.add(ambient);
+  }
+
+  // --- Table ---
+  function buildTable() {
+    const edgeGeo = new THREE.BoxGeometry(TABLE_W + 1, TABLE_H + 0.5, TABLE_D + 1);
+    const edgeMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2a35, roughness: 0.6, metalness: 0.4
+    });
+    const edge = new THREE.Mesh(edgeGeo, edgeMat);
+    edge.position.y = -0.1;
+    scene.add(edge);
+
+    const tableGeo = new THREE.BoxGeometry(TABLE_W, TABLE_H, TABLE_D);
+    const tableMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a20, roughness: 0.7, metalness: 0.3
+    });
+    const table = new THREE.Mesh(tableGeo, tableMat);
+    table.position.y = 0;
+    scene.add(table);
+  }
+
+  // --- Control Panel ---
+  function buildControlPanel() {
+    const panelGeo = new THREE.BoxGeometry(10, 0.5, 14);
+    const panelMat = new THREE.MeshStandardMaterial({
+      color: 0x1a2030, roughness: 0.5, metalness: 0.5
+    });
+    const panel = new THREE.Mesh(panelGeo, panelMat);
+    panel.position.set(-TABLE_W / 2 - 6, TABLE_TOP + 0.25, 0);
+    scene.add(panel);
+
+    const ledRadius = 0.25;
+    const ledGeo = new THREE.SphereGeometry(ledRadius, 8, 8);
+
+    const greenMat = new THREE.MeshStandardMaterial({
+      color: 0x003300, emissive: 0x00ff66, emissiveIntensity: 0.8
+    });
+    ledGreen = new THREE.Mesh(ledGeo, greenMat);
+    ledGreen.position.set(-TABLE_W / 2 - 8, TABLE_TOP + 0.7, -3);
+    scene.add(ledGreen);
+
+    const redMat = new THREE.MeshStandardMaterial({
+      color: 0x330000, emissive: 0x331111, emissiveIntensity: 0.3
+    });
+    ledRed = new THREE.Mesh(ledGeo, redMat);
+    ledRed.position.set(-TABLE_W / 2 - 8, TABLE_TOP + 0.7, -1);
+    scene.add(ledRed);
+
+    const blueMat = new THREE.MeshStandardMaterial({
+      color: 0x000033, emissive: 0x0066ff, emissiveIntensity: 0.5
+    });
+    ledBlue = new THREE.Mesh(ledGeo, blueMat);
+    ledBlue.position.set(-TABLE_W / 2 - 8, TABLE_TOP + 0.7, 1);
+    scene.add(ledBlue);
+
+    const yellowMat = new THREE.MeshStandardMaterial({
+      color: 0x332200, emissive: 0x332211, emissiveIntensity: 0.3
+    });
+    ledYellow = new THREE.Mesh(ledGeo, yellowMat);
+    ledYellow.position.set(-TABLE_W / 2 - 8, TABLE_TOP + 0.7, 3);
+    scene.add(ledYellow);
+  }
+
+  // --- Projector ---
+  function buildProjector() {
+    const projector = new THREE.SpotLight(0x0044aa, 0.8);
+    projector.position.set(0, -5, 0);
+    projector.angle = Math.PI * 0.3;
+    projector.penumbra = 0.8;
+    projector.castShadow = false;
+    projector.decay = 1;
+    projector.distance = 40;
+
+    const target = new THREE.Object3D();
+    target.position.set(0, 20, 0);
+    scene.add(target);
+    projector.target = target;
+    scene.add(projector);
+
+    // Hologram area glow
+    const holoGlow = new THREE.PointLight(0x003366, 0.4, 50);
+    holoGlow.position.set(0, TABLE_TOP + 5, 0);
+    scene.add(holoGlow);
+  }
+
+  // --- Hologram Base ---
+  function buildHologramBase() {
+    const baseW = TABLE_FIELD_W + 2;
+    const baseD = TABLE_FIELD_D + 2;
+    const holoBaseGeo = new THREE.PlaneGeometry(baseW, baseD, 1, 1);
+
+    holoBaseMat = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform float gridSpacing;
+        uniform vec3 gridColor;
+        uniform vec3 baseGlow;
+        uniform float time;
+
+        void main() {
+          vec2 grid = abs(fract(vUv * gridSpacing) - 0.5) * 2.0;
+          float line = 1.0 - min(min(grid.x, grid.y) * gridSpacing * 2.0, 1.0);
+
+          float glow = 0.04;
+
+          // Scan line sweeping vertically every ~2 seconds
+          float scanY = fract(time * 0.5);
+          float scan = smoothstep(0.015, 0.0, abs(vUv.y - scanY)) * 0.2;
+
+          // Edge vignette
+          float edgeFade = smoothstep(0.0, 0.05, vUv.x) * smoothstep(1.0, 0.95, vUv.x) *
+                           smoothstep(0.0, 0.05, vUv.y) * smoothstep(1.0, 0.95, vUv.y);
+
+          float alpha = (line * 0.25 + glow + scan) * edgeFade;
+          vec3 color = mix(baseGlow, gridColor, line);
+
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      uniforms: {
+        gridSpacing: { value: 8.0 },
+        gridColor: { value: new THREE.Color(0x0066cc) },
+        baseGlow: { value: new THREE.Color(0x0044aa) },
+        time: { value: 0 }
+      }
+    });
+
+    const holoBase = new THREE.Mesh(holoBaseGeo, holoBaseMat);
+    holoBase.rotation.x = -Math.PI / 2;
+    holoBase.position.y = TABLE_TOP + 0.1;
+    scene.add(holoBase);
+
+    // Field boundary wireframe
+    const boundGeo = new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(TABLE_FIELD_W, 0.1, TABLE_FIELD_D)
+    );
+    const boundMat = new THREE.LineBasicMaterial({
+      color: 0x0066cc, transparent: true, opacity: 0.3
+    });
+    const boundary = new THREE.LineSegments(boundGeo, boundMat);
+    boundary.position.y = TABLE_TOP + 0.15;
+    scene.add(boundary);
+  }
+
+  // --- Kill marker group ---
+  function buildKillMarkerGroup() {
+    killMarkerGroup = new THREE.Group();
+    scene.add(killMarkerGroup);
+  }
+
+  // --- Bot shape logic ---
+  function getHologramShape(bot) {
+    if (bot.attack > bot.speed && bot.attack > bot.defence) return 'hunter';
+    if (bot.defence > bot.attack && bot.defence > bot.speed) return 'survivor';
+    if (bot.speed > bot.attack && bot.speed > bot.defence) return 'gatherer';
+    return 'balanced';
+  }
+
+  // Creates geometry with height=1 (unit height), scaled via mesh.scale.y at runtime
+  function createUnitBodyGeometry(shape) {
+    switch (shape) {
+      case 'hunter':
+        return new THREE.ConeGeometry(1.2, 1, 4);
+      case 'survivor': {
+        const g = new THREE.OctahedronGeometry(1.0, 0);
+        // Octahedron spans y=-1 to y=1, height=2. Scale to unit height.
+        g.scale(1, 0.5, 1);
+        return g;
+      }
+      case 'gatherer': {
+        // Half-sphere: height = radius = 1 (already unit)
+        return new THREE.SphereGeometry(1.0, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+      }
+      case 'balanced':
+      default:
+        return new THREE.CylinderGeometry(0.8, 1.0, 1, 6);
+    }
+  }
+
+  // --- Bot Holograms ---
+  function buildBotHolograms() {
+    botGroups = [];
+    for (const bot of engine.bots) {
+      const group = new THREE.Group();
+
+      const initHeight = 2 + bot.totalStats * 0.15;
+      const shape = getHologramShape(bot);
+      const color = new THREE.Color(bot.colorHex);
+
+      // Body (unit geometry, scaled by height at runtime)
+      const bodyGeo = createUnitBodyGeometry(shape);
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.5,
+        transparent: true,
+        opacity: 0.6,
+        roughness: 0.2,
+        metalness: 0.3,
+        side: THREE.DoubleSide
+      });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      group.add(body);
+
+      // Wireframe overlay
+      const wireGeo = createUnitBodyGeometry(shape);
+      const wireMat = new THREE.MeshBasicMaterial({
+        color: color,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.3
+      });
+      const wire = new THREE.Mesh(wireGeo, wireMat);
+      group.add(wire);
+
+      // Height beam (unit cylinder h=1, will be scaled)
+      const beamGeo = new THREE.CylinderGeometry(0.05, 0.05, UNIT_BEAM_H, 4);
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.2,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      group.add(beam);
+
+      // Base ring
+      const ringGeo = new THREE.RingGeometry(0.8, 1.2, 16);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.4,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = TABLE_TOP + 0.05;
+      group.add(ring);
+
+      // Data label (sprite)
+      const label = createDataLabel(bot);
+      label.visible = false;
+      group.add(label);
+
+      const pos = fieldToTable(bot.x, bot.y);
+      group.position.set(pos.x, 0, pos.z);
+
+      scene.add(group);
+
+      botGroups.push({
+        group, body, wire, beam, ring, label, bot,
+        bodyMat, wireMat, beamMat, ringMat,
+        currentHeight: initHeight,
+        currentShape: shape,
+        glitching: false,
+        glitchOffsetX: 0,
+        glitchOffsetZ: 0
+      });
+    }
+  }
+
+  function createDataLabel(bot) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 64;
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.font = '14px Courier New';
+    ctx.fillStyle = '#00ccff';
+    const prefix = bot.isPlayer ? 'CMDR' : `B-${bot.index.toString().padStart(2, '0')}`;
+    ctx.fillText(prefix, 10, 18);
+    ctx.fillText(`S:${bot.speed.toFixed(1)} A:${bot.attack.toFixed(1)} D:${bot.defence.toFixed(1)} L:${bot.lives.toFixed(1)}`, 10, 38);
+    ctx.fillText(`K:${bot.killCount}`, 10, 56);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const spriteMat = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(6, 1.5, 1);
+    sprite.position.y = 8;
+    sprite.userData.canvas = canvas;
+    sprite.userData.ctx = ctx;
+    sprite.userData.texture = texture;
+    return sprite;
+  }
+
+  function updateDataLabel(bg) {
+    const bot = bg.bot;
+    const label = bg.label;
+    const ctx = label.userData.ctx;
+    const canvas = label.userData.canvas;
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.font = '14px Courier New';
+    ctx.fillStyle = '#00ccff';
+    const prefix = bot.isPlayer ? 'CMDR' : `B-${bot.index.toString().padStart(2, '0')}`;
+    ctx.fillText(prefix, 10, 18);
+    ctx.fillText(`S:${bot.speed.toFixed(1)} A:${bot.attack.toFixed(1)} D:${bot.defence.toFixed(1)} L:${bot.lives.toFixed(1)}`, 10, 38);
+    ctx.fillText(`K:${bot.killCount}`, 10, 56);
+    label.userData.texture.needsUpdate = true;
+  }
+
+  // --- Rebuild bot meshes when shape changes ---
+  function rebuildBotShape(bg, newShape) {
+    bg.group.remove(bg.body);
+    bg.group.remove(bg.wire);
+    bg.body.geometry.dispose();
+    bg.wire.geometry.dispose();
+
+    const bodyGeo = createUnitBodyGeometry(newShape);
+    bg.body = new THREE.Mesh(bodyGeo, bg.bodyMat);
+    bg.group.add(bg.body);
+
+    const wireGeo = createUnitBodyGeometry(newShape);
+    bg.wire = new THREE.Mesh(wireGeo, bg.wireMat);
+    bg.group.add(bg.wire);
+
+    bg.currentShape = newShape;
+  }
+
+  // --- Food Holograms ---
+  function buildFoodHolograms() {
+    foodMeshes = [];
+    const foodGeo = new THREE.OctahedronGeometry(0.4, 0);
+
+    for (const dot of engine.dots) {
+      const foodMat = new THREE.MeshStandardMaterial({
+        color: 0xffcc00,
+        emissive: 0xffaa00,
+        emissiveIntensity: 0.8,
+        transparent: true,
+        opacity: 0.7
+      });
+      const mesh = new THREE.Mesh(foodGeo, foodMat);
+      const pos = fieldToTable(dot.x, dot.y);
+      mesh.position.set(pos.x, TABLE_TOP + 1.0, pos.z);
+      scene.add(mesh);
+      foodMeshes.push({ mesh, dot, derezTimer: 0, targetScale: 1, currentScale: 1 });
+    }
+  }
+
+  // --- Combat Arcs ---
+  function createCombatArc(bot1, bot2) {
+    const p1 = fieldToTable(bot1.x, bot1.y);
+    const p2 = fieldToTable(bot2.x, bot2.y);
+    const h1 = 2 + bot1.totalStats * 0.15;
+    const h2 = 2 + bot2.totalStats * 0.15;
+
+    const points = [];
+    const segments = 5;
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const x = p1.x + (p2.x - p1.x) * t;
+      const z = p1.z + (p2.z - p1.z) * t;
+      const baseY = TABLE_TOP + (h1 + (h2 - h1) * t) * 0.5;
+      const jitter = (i > 0 && i < segments) ? (Math.random() - 0.5) * 2.0 : 0;
+      points.push(new THREE.Vector3(
+        x + (Math.random() - 0.5) * 0.5,
+        baseY + jitter,
+        z + (Math.random() - 0.5) * 0.5
+      ));
+    }
+
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    combatArcs.push({ line, life: 8 });
+  }
+
+  // --- Kill Markers ---
+  function addKillMarker(fieldX, fieldY, isPlayerKill) {
+    const pos = fieldToTable(fieldX, fieldY);
+    const size = 0.4;
+    const color = isPlayerKill ? 0xffcc00 : 0xff3344;
+    const mat = new THREE.LineBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const g1 = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-size, 0, -size),
+      new THREE.Vector3(size, 0, size)
+    ]);
+    const g2 = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-size, 0, size),
+      new THREE.Vector3(size, 0, -size)
+    ]);
+    const xGroup = new THREE.Group();
+    xGroup.add(new THREE.Line(g1, mat));
+    xGroup.add(new THREE.Line(g2, mat));
+    xGroup.position.set(pos.x, TABLE_TOP + 0.08, pos.z);
+    killMarkerGroup.add(xGroup);
+    killMarkers.push({ group: xGroup });
+  }
+
+  // --- Death flash (bright point light at death location) ---
+  function addDeathFlash(fieldX, fieldY) {
+    const pos = fieldToTable(fieldX, fieldY);
+    const light = new THREE.PointLight(0xffffff, 2.0, 15);
+    light.position.set(pos.x, TABLE_TOP + 2, pos.z);
+    scene.add(light);
+    deathFlashes.push({ light, life: 10 });
+  }
+
+  // --- HUD ---
+  function updateHUD() {
+    const bot = engine.followedBot;
+    if (!bot) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60).toString().padStart(1, '0');
+    const secs = (elapsed % 60).toString().padStart(2, '0');
+    const pop = engine.bots.length;
+    const prefix = bot.isPlayer ? 'COMMANDER' : `BOT-${bot.index.toString().padStart(2, '0')}`;
+    const star = bot.isPlayer ? '\u2605 ' : '';
+    const pauseTag = engine.paused ? ' [PAUSED]' : '';
+    document.getElementById('hud-text').textContent =
+      `${star}${prefix} | SPD ${bot.speed.toFixed(1)} | ATK ${bot.attack.toFixed(1)} | DEF ${bot.defence.toFixed(1)} | LIV ${bot.lives.toFixed(1)} | K:${bot.killCount} | POP: ${pop}/${BOT_COUNT} | \u23F1 ${mins}:${secs}${pauseTag}`;
+  }
+
+  // --- LED Updates ---
+  function updateLEDs() {
+    ledGreen.material.emissive.setHex(0x00ff66);
+    ledGreen.material.emissiveIntensity = 0.8;
+
+    if (combatActive) {
+      ledRed.material.emissive.setHex(0xff3344);
+      ledRed.material.emissiveIntensity = 1.0;
+    } else {
+      ledRed.material.emissive.setHex(0x331111);
+      ledRed.material.emissiveIntensity = 0.3;
+    }
+
+    const pulse = Math.sin(Date.now() * 0.003) * 0.3 + 0.7;
+    ledBlue.material.emissive.setHex(0x0066ff);
+    ledBlue.material.emissiveIntensity = engine.paused ? 0.2 : pulse;
+
+    if (killEventTimer > 0) {
+      ledYellow.material.emissive.setHex(0xffcc00);
+      ledYellow.material.emissiveIntensity = 1.0;
+      killEventTimer--;
+    } else {
+      ledYellow.material.emissive.setHex(0x332211);
+      ledYellow.material.emissiveIntensity = 0.3;
+    }
+  }
+
+  // --- Main Update ---
+  function updateScene() {
+    engine.update();
+    const time = Date.now() * 0.001;
+
+    // Scan line continues even when paused
+    holoBaseMat.uniforms.time.value = time;
+
+    // Track combat this frame
+    combatActive = false;
+
+    // Process engine events
+    for (const evt of engine.events) {
+      if (evt.type === 'combat') {
+        combatActive = true;
+        createCombatArc(evt.bot1, evt.bot2);
+      }
+      if (evt.type === 'death') {
+        killEventTimer = 30;
+        const isPlayerKill = evt.killer && evt.killer.isPlayer;
+        addKillMarker(evt.x, evt.y, isPlayerKill);
+        addDeathFlash(evt.x, evt.y);
+      }
+      if (evt.type === 'eat') {
+        // Find the food mesh closest to the old dot position and trigger derez
+        const eatPos = fieldToTable(evt.dotPos.x, evt.dotPos.y);
+        let bestFm = null, bestDist = Infinity;
+        for (const fm of foodMeshes) {
+          const dx = fm.mesh.position.x - eatPos.x;
+          const dz = fm.mesh.position.z - eatPos.z;
+          const d = dx * dx + dz * dz;
+          if (d < bestDist) { bestDist = d; bestFm = fm; }
+        }
+        if (bestFm && bestDist < 4) {
+          bestFm.derezTimer = 10;
+          bestFm.targetScale = 0;
+        }
+      }
+    }
+
+    // Update combat arcs
+    for (let i = combatArcs.length - 1; i >= 0; i--) {
+      const arc = combatArcs[i];
+      arc.life--;
+      arc.line.material.opacity = (arc.life / 8) * 0.9;
+      if (arc.life <= 0) {
+        scene.remove(arc.line);
+        arc.line.geometry.dispose();
+        arc.line.material.dispose();
+        combatArcs.splice(i, 1);
+      }
+    }
+
+    // Update death flashes
+    for (let i = deathFlashes.length - 1; i >= 0; i--) {
+      const df = deathFlashes[i];
+      df.life--;
+      df.light.intensity = (df.life / 10) * 2.0;
+      if (df.life <= 0) {
+        scene.remove(df.light);
+        deathFlashes.splice(i, 1);
+      }
+    }
+
+    // Materialization factor (0 to 1)
+    const matScale = started ? Math.min(materializeProgress, 1.0) : 0;
+
+    // --- Update Bots ---
+    for (const bg of botGroups) {
+      const bot = bg.bot;
+      const pos = fieldToTable(bot.x, bot.y);
+
+      // Position with glitch offset
+      bg.group.position.x = pos.x + bg.glitchOffsetX;
+      bg.group.position.z = pos.z + bg.glitchOffsetZ;
+
+      // Smooth height lerp
+      const targetHeight = 2 + bot.totalStats * 0.15;
+      bg.currentHeight += (targetHeight - bg.currentHeight) * 0.05;
+      const h = bg.currentHeight;
+
+      // Check shape change
+      const newShape = getHologramShape(bot);
+      if (newShape !== bg.currentShape) {
+        rebuildBotShape(bg, newShape);
+      }
+
+      // Effective display height (height * materialization)
+      const displayH = h * matScale;
+
+      // Body: scale Y by displayH (unit geometry), position so bottom sits on table
+      bg.body.scale.set(1, displayH, 1);
+      bg.body.position.y = displayH / 2 + TABLE_TOP;
+
+      // Wire: same transform
+      bg.wire.scale.set(1, displayH, 1);
+      bg.wire.position.y = displayH / 2 + TABLE_TOP;
+
+      // Beam: stretch from table surface to top of figure
+      bg.beam.scale.set(1, displayH / UNIT_BEAM_H, 1);
+      bg.beam.position.y = displayH / 2 + TABLE_TOP;
+
+      // --- Holographic effects ---
+      // Flicker
+      const flicker = 0.4 + Math.random() * 0.2;
+      bg.bodyMat.emissiveIntensity = flicker;
+
+      // Glitch reset from previous frame
+      if (bg.glitching) {
+        bg.glitchOffsetX = 0;
+        bg.glitchOffsetZ = 0;
+        bg.glitching = false;
+      }
+      // Random glitch (0.2% chance per frame)
+      if (Math.random() < 0.002) {
+        bg.glitching = true;
+        bg.glitchOffsetX = (Math.random() - 0.5) * 0.4;
+        bg.glitchOffsetZ = (Math.random() - 0.5) * 0.4;
+        bg.bodyMat.emissiveIntensity = 1.5;
+      }
+
+      // Combat flash
+      if (bot.justTookDamage) {
+        bg.bodyMat.emissiveIntensity = 0.8 + Math.random() * 0.5;
+        bg.ringMat.opacity = 0.6 + Math.random() * 0.4;
+      }
+
+      // Selected bot highlight
+      const isSelected = bot === engine.followedBot;
+      if (!bot.justTookDamage) {
+        bg.ringMat.opacity = isSelected ? 0.7 : 0.4;
+      }
+      bg.label.visible = isSelected;
+      if (isSelected) {
+        updateDataLabel(bg);
+        bg.label.position.y = displayH + TABLE_TOP + 2;
+      }
+    }
+
+    // --- Update Food ---
+    for (const fm of foodMeshes) {
+      const pos = fieldToTable(fm.dot.x, fm.dot.y);
+
+      // Derez animation
+      if (fm.derezTimer > 0) {
+        fm.derezTimer--;
+        fm.currentScale = Math.max(0, fm.currentScale - 0.1);
+        fm.mesh.material.emissiveIntensity = 1.5; // bright flash
+        if (fm.derezTimer <= 0) {
+          // Reset (dot has respawned to new position)
+          fm.currentScale = 1;
+          fm.targetScale = 1;
+          fm.mesh.material.emissiveIntensity = 0.8;
+        }
+      } else {
+        fm.currentScale += (fm.targetScale - fm.currentScale) * 0.2;
+      }
+
+      fm.mesh.position.set(pos.x, TABLE_TOP + 1.0, pos.z);
+      fm.mesh.rotation.y += 0.02;
+      fm.mesh.rotation.x = Math.sin(time * 2 + pos.x * 10) * 0.1;
+      fm.mesh.scale.setScalar(fm.currentScale);
+    }
+
+    // Kill marker visibility
+    killMarkerGroup.visible = showKillMarkers;
+
+    updateLEDs();
+    updateHUD();
+
+    // Advance materialization
+    if (started && materializeProgress < 1.0) {
+      materializeProgress += 0.016; // ~1 second at 60fps
+    }
+  }
+
+  // --- Start Game ---
+  function startGame() {
+    document.getElementById('setup-screen').style.display = 'none';
+    document.getElementById('hud').style.display = 'block';
+    document.getElementById('controls-hint').style.display = 'block';
+    started = true;
+    startTime = Date.now();
+    materializeProgress = 0;
+  }
+
+  // --- Input ---
+  function onKeyDown(e) {
+    if (!started) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      engine.cycleFollowedBot();
+    }
+    if (e.key === 'k' || e.key === 'K') {
+      showKillMarkers = !showKillMarkers;
+    }
+    if (e.key === ' ') {
+      e.preventDefault();
+      engine.paused = !engine.paused;
+    }
+    if (e.key === 'Escape') {
+      camera.position.copy(DEFAULT_CAM_POS);
+      controls.target.copy(DEFAULT_CAM_TARGET);
+      controls.update();
+    }
+  }
+
+  function onResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // --- Render Loop ---
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+
+    if (started) {
+      updateScene();
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  // --- Boot ---
+  init();
+  animate();
+
+})();
+</script>
+</body>
+</html>
