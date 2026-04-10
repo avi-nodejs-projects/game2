@@ -137,13 +137,22 @@ reproduction.js → relationships.js → packs.js → corpse.js → combat.js
 
 **Deferred note (not a bug):** `bots`, `yellowDots`, and `camera` are declared in `main.js` but referenced by `combat.js`. This works via late-binding (function bodies resolve free variables at call time, not parse time) but is a minor dependency-inversion smell. For the upcoming test harness we will pre-populate these in the vm context; out of scope for Phase 1.
 
-### Phase 2 — Harness + foundation tests (~1 hour)
-- `test/harness.js` — vm context loader
-- `test/rng.js` — mulberry32
-- `test/helpers.js` — fixtures, assertions, file logging
-- `test/run.js` — CLI with `--quick`, `--suite`, `--seed`
-- `test/unit/bot-core.test.js` — first unit test file to prove harness works
-- Update `.gitignore` to exclude `test/results/`
+### ✅ Phase 2 — Harness + foundation tests — COMPLETE
+- [x] `test/rng.js` — mulberry32 seeded PRNG
+- [x] `test/harness.js` — vm context loader with DOM stubs, pre-populated state, seeded Math wrapper
+- [x] `test/helpers.js` — fixtures (`createTestContext`, `runFrames`), assertion helpers (`assertApprox`, `assertInRange`, etc.)
+- [x] `test/run.js` — CLI runner with `--quick`, `--suite`, `--seed`, `--verbose`, TAP parsing, bulletin output, file logging
+- [x] `test/unit/bot-core.test.js` — 26 tests covering Bot class fundamentals
+- [x] `.gitignore` — `bots-strategy-v11/test/results/` excluded
+
+**Harness notes:**
+- v11 uses `const`/`let`/`class` at the top level of each file. These do NOT become properties of the vm global object (unlike `var`/`function`). Workaround: concatenate all model files into a single script and append an epilogue that assigns each known top-level binding (e.g., `this.Bot = Bot`) to the global object. The list of bindings to expose lives in `LEXICAL_BINDINGS_TO_EXPOSE` in `harness.js` and must be updated when new top-level const/let/class declarations are added to v11.
+- Seeded `Math.random` via a wrapper object that delegates all other Math methods to the host Math. Does NOT mutate the host Math.
+- State globals normally declared in main.js (`bots`, `yellowDots`, `camera`, etc.) are pre-populated on the context before loading files, so combat.js function bodies have everything they need at call time.
+- Node v25 changed `--test <dir>` behavior; the runner expands test files recursively and passes them individually to work around version differences.
+- Cross-vm-context object identity quirk: `deepStrictEqual` fails on otherwise-equal objects because they don't share `Object.prototype` with the host. Tests should compare fields individually.
+
+**Smoke test:** `node test/run.js --quick` → 26/26 pass in ~200ms.
 
 ### Phase 3 — Unit tests for pure methods (~3-4 hours)
 Per file listed in `unit/`.
