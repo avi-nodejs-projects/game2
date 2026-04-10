@@ -48,6 +48,14 @@ const MODEL_FILES = [
 // vm global object. Function declarations are auto-exposed. This
 // list must be kept in sync if new top-level bindings are added in
 // v11 model files.
+//
+// Primitive `let` bindings (frameCount, decisionCount, strategyMode,
+// etc.) are exposed via Object.defineProperty getter/setter pairs
+// that close over the lexical binding. This makes `ctx.frameCount`
+// a LIVE view of the binding: reads return the current value, and
+// writes mutate the actual let variable. Object bindings use the
+// same mechanism for consistency; their contents propagate
+// naturally via reference.
 const LEXICAL_BINDINGS_TO_EXPOSE = [
   // config.js constants
   'WORLD_WIDTH', 'WORLD_HEIGHT', 'BOT_COUNT', 'DOT_COUNT',
@@ -73,6 +81,8 @@ const LEXICAL_BINDINGS_TO_EXPOSE = [
   'corpses', 'packs', 'nextPackId', 'protectionPairs',
   // game.js classes
   'YellowDot', 'Bot',
+  // bot-ai.js internal caches (exposed for test control)
+  '_ctxGlobalCache', '_ctxGlobalCacheFrame',
   // corpse.js class
   'Corpse',
 ];
@@ -155,15 +165,25 @@ function buildCombinedScript() {
     parts.push(`// ===== END ${file} =====`);
   }
 
-  // Epilogue — expose lexical bindings to the global object. Each
-  // assignment is guarded because not every binding may be defined
-  // (the list is a superset).
+  // Epilogue — expose lexical bindings to the global object via
+  // live getter/setter properties. The getter/setter close over the
+  // lexical binding, so `ctx.X` reads always return the current
+  // value and `ctx.X = v` mutates the actual binding. This is
+  // essential for primitive `let` bindings (frameCount, etc.); for
+  // objects it's consistent and cheap.
+  //
+  // Each defineProperty is guarded because not every binding may
+  // be defined (the list is a superset across files).
   parts.push('// ===== EPILOGUE: expose bindings to vm global =====');
-  parts.push('try {');
   for (const name of LEXICAL_BINDINGS_TO_EXPOSE) {
-    parts.push(`  try { this.${name} = ${name}; } catch (e) {}`);
+    parts.push(
+      `try { Object.defineProperty(this, ${JSON.stringify(name)}, {` +
+      ` get: function() { return ${name}; },` +
+      ` set: function(_v) { ${name} = _v; },` +
+      ` configurable: true, enumerable: true });` +
+      ` } catch (e) {}`
+    );
   }
-  parts.push('} catch (e) {}');
 
   return parts.join('\n');
 }

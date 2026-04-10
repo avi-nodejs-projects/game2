@@ -146,13 +146,21 @@ reproduction.js → relationships.js → packs.js → corpse.js → combat.js
 - [x] `.gitignore` — `bots-strategy-v11/test/results/` excluded
 
 **Harness notes:**
-- v11 uses `const`/`let`/`class` at the top level of each file. These do NOT become properties of the vm global object (unlike `var`/`function`). Workaround: concatenate all model files into a single script and append an epilogue that assigns each known top-level binding (e.g., `this.Bot = Bot`) to the global object. The list of bindings to expose lives in `LEXICAL_BINDINGS_TO_EXPOSE` in `harness.js` and must be updated when new top-level const/let/class declarations are added to v11.
+- v11 uses `const`/`let`/`class` at the top level of each file. These do NOT become properties of the vm global object (unlike `var`/`function`). Workaround: concatenate all model files into a single script and append an epilogue that defines `Object.defineProperty` getters/setters for each known top-level binding. The getter/setter close over the lexical binding, so `ctx.frameCount` is a **live view** — reads return the current value and writes mutate the actual `let` variable. Essential for primitive lets like `frameCount`, `decisionCount`. The list of bindings lives in `LEXICAL_BINDINGS_TO_EXPOSE` in `harness.js` and must be updated when new top-level const/let/class declarations are added to v11.
 - Seeded `Math.random` via a wrapper object that delegates all other Math methods to the host Math. Does NOT mutate the host Math.
 - State globals normally declared in main.js (`bots`, `yellowDots`, `camera`, etc.) are pre-populated on the context before loading files, so combat.js function bodies have everything they need at call time.
 - Node v25 changed `--test <dir>` behavior; the runner expands test files recursively and passes them individually to work around version differences.
 - Cross-vm-context object identity quirk: `deepStrictEqual` fails on otherwise-equal objects because they don't share `Object.prototype` with the host. Tests should compare fields individually.
+- `createTestContext` auto-consumes `TEST_SEED` env var (set by `run.js --seed`) so tests using the helper are deterministic by default.
 
-**Smoke test:** `node test/run.js --quick` → 26/26 pass in ~200ms.
+**Review findings addressed (see commit after `16cc022`):**
+- P1: live binding views via Object.defineProperty (frameCount etc. now bidirectional)
+- P2: `_ctxGlobalCache`, `_ctxGlobalCacheFrame` added to exposure list
+- P2: `TEST_SEED` auto-consumption in `createTestContext`
+- P2: `test/unit/helpers.test.js` formalizes helper verification (30 tests)
+- P3: `test/README.md` added with quick-start and gotchas
+
+**Smoke test:** `node test/run.js --quick` → 56/56 pass in ~240ms.
 
 ### Phase 3 — Unit tests for pure methods (~3-4 hours)
 Per file listed in `unit/`.

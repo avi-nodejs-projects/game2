@@ -4,18 +4,25 @@
 const assert = require('node:assert');
 const { createGameContext, resetGameState } = require('./harness');
 
+// Default seed: respect TEST_SEED env var (set by run.js --seed) so
+// that tests using this helper are deterministic by default. Falls
+// back to 42 if not set. Callers can still override via options.seed.
+const DEFAULT_SEED = process.env.TEST_SEED
+  ? parseInt(process.env.TEST_SEED, 10)
+  : 42;
+
 /**
  * Create a test context with N bots and M dots pre-spawned.
  * Bot 0 is flagged as the player.
  *
  * @param {object} [options]
- * @param {number} [options.seed=42]
+ * @param {number} [options.seed] - defaults to TEST_SEED env var or 42
  * @param {number} [options.botCount=5]
  * @param {number} [options.dotCount=10]
  * @returns {object} vm context with populated bots/yellowDots
  */
 function createTestContext(options = {}) {
-  const { seed = 42, botCount = 5, dotCount = 10 } = options;
+  const { seed = DEFAULT_SEED, botCount = 5, dotCount = 10 } = options;
   const ctx = createGameContext({ seed });
 
   for (let i = 0; i < dotCount; i++) {
