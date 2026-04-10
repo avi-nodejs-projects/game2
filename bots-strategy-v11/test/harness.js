@@ -208,12 +208,15 @@ function createFilteredConsole(options) {
   const consumeSuppression = () => { suppressFollowups--; };
 
   const shouldSuppress = (args) => {
-    if (inSuppressedBlock()) {
-      consumeSuppression();
-      return true;
-    }
+    // Always reset the window when we see a new STUCK BOT header.
+    // (Without this, two overlapping stuck-bot blocks would share
+    // a single suppression count and the second would leak output.)
     if (args[0] && typeof args[0] === 'string' && args[0].includes('STUCK BOT DETECTED')) {
       suppressFollowups = STUCK_FOLLOWUP_LINES;
+      return true;
+    }
+    if (inSuppressedBlock()) {
+      consumeSuppression();
       return true;
     }
     return false;
