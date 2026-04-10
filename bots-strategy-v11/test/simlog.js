@@ -19,6 +19,12 @@
 //   --lifecycle LIST    comma-separated: invincibility,starvation,age,repro-asexual,
 //                       repro-sexual,packs,all,none (default: none)
 //   --decisions         also log every pickNewTarget decision (VERBOSE)
+//   --damage-floor F    enable combatSettings.damageFloor with fraction=F (0-1)
+//                       e.g. --damage-floor 0.1 → weak attackers still chip 10%
+//   --stat-cap N        enable combatSettings.statCap with maxPerStat=N
+//                       e.g. --stat-cap 50 → individual stats can't exceed 50
+//   --stalemate MODE    stalemateBreaker formula: division|forceRespawnBoth|skip|off
+//                       (default: division — original v11 behavior)
 //   --quiet             suppress progress output
 //   --help              show this help
 //
@@ -44,6 +50,9 @@ function parseArgs(argv) {
     gzip: false,
     lifecycle: 'none',
     decisions: false,
+    damageFloor: null,     // null = keep config default (off)
+    statCap: null,
+    stalemate: null,
     quiet: false,
   };
   for (let i = 2; i < argv.length; i++) {
@@ -58,6 +67,9 @@ function parseArgs(argv) {
       case '--gzip':       args.gzip = true; break;
       case '--lifecycle':  args.lifecycle = argv[++i]; break;
       case '--decisions':  args.decisions = true; break;
+      case '--damage-floor': args.damageFloor = parseFloat(argv[++i]); break;
+      case '--stat-cap':     args.statCap = parseInt(argv[++i], 10); break;
+      case '--stalemate':    args.stalemate = argv[++i]; break;
       case '--quiet':      args.quiet = true; break;
       case '--help': case '-h':
         printHelp(); process.exit(0);
@@ -132,6 +144,28 @@ function createWriter(filepath, gzip) {
 }
 
 // ---- Lifecycle config toggle --------------------------------------
+
+function applyCombatSettings(ctx, args) {
+  const cs = ctx.combatSettings;
+  if (args.damageFloor !== null) {
+    cs.damageFloor.enabled = true;
+    cs.damageFloor.fraction = args.damageFloor;
+  }
+  if (args.statCap !== null) {
+    cs.statCap.enabled = true;
+    cs.statCap.maxPerStat = args.statCap;
+  }
+  if (args.stalemate !== null) {
+    if (args.stalemate === 'off') {
+      cs.stalemateBreaker.enabled = false;
+    } else if (['division', 'forceRespawnBoth', 'skip'].includes(args.stalemate)) {
+      cs.stalemateBreaker.enabled = true;
+      cs.stalemateBreaker.formula = args.stalemate;
+    } else {
+      throw new Error(`Unknown --stalemate value: ${args.stalemate}`);
+    }
+  }
+}
 
 function applyLifecycle(ctx, spec) {
   const ls = ctx.lifecycleSettings;
@@ -309,6 +343,7 @@ async function main() {
 
   const ctx = createTestContext({ seed: args.seed, botCount: args.bots, dotCount: args.dots });
   applyLifecycle(ctx, args.lifecycle);
+  applyCombatSettings(ctx, args);
 
   const writer = createWriter(args.out, args.gzip);
 
@@ -323,6 +358,20 @@ async function main() {
     snapEvery: args.snapEvery,
     lifecycle: args.lifecycle,
     decisions: args.decisions,
+    combat: {
+      stalemateBreaker: {
+        enabled: ctx.combatSettings.stalemateBreaker.enabled,
+        formula: ctx.combatSettings.stalemateBreaker.formula,
+      },
+      damageFloor: {
+        enabled: ctx.combatSettings.damageFloor.enabled,
+        fraction: ctx.combatSettings.damageFloor.fraction,
+      },
+      statCap: {
+        enabled: ctx.combatSettings.statCap.enabled,
+        maxPerStat: ctx.combatSettings.statCap.maxPerStat,
+      },
+    },
     worldWidth: ctx.WORLD_WIDTH,
     worldHeight: ctx.WORLD_HEIGHT,
   });
