@@ -18,7 +18,13 @@
 //   --gzip              compress output with gzip
 //   --lifecycle LIST    comma-separated: invincibility,starvation,age,repro-asexual,
 //                       repro-sexual,packs,all,none (default: none)
-//   --decisions         also log every pickNewTarget decision (VERBOSE)
+//   --decisions         also log every pickNewTarget decision (VERBOSE).
+//                       Captures player + NPC decisions by wrapping
+//                       Bot.prototype.pickNewTarget.
+//   --npc-strategies    enable npcSettings.randomStrategy so NPCs are
+//                       assigned strategy templates (gatherer/hunter/...)
+//                       and routed through the behavior-blending logic.
+//                       Without this, all NPCs use pickNewTargetSimple.
 //   --damage-floor F    enable combatSettings.damageFloor with fraction=F (0-1)
 //                       e.g. --damage-floor 0.1 → weak attackers still chip 10%
 //   --stat-cap N        enable combatSettings.statCap with maxPerStat=N
@@ -50,6 +56,7 @@ function parseArgs(argv) {
     gzip: false,
     lifecycle: 'none',
     decisions: false,
+    npcStrategies: false,
     damageFloor: null,     // null = keep config default (off)
     statCap: null,
     stalemate: null,
@@ -67,6 +74,7 @@ function parseArgs(argv) {
       case '--gzip':       args.gzip = true; break;
       case '--lifecycle':  args.lifecycle = argv[++i]; break;
       case '--decisions':  args.decisions = true; break;
+      case '--npc-strategies': args.npcStrategies = true; break;
       case '--damage-floor': args.damageFloor = parseFloat(argv[++i]); break;
       case '--stat-cap':     args.statCap = parseInt(argv[++i], 10); break;
       case '--stalemate':    args.stalemate = argv[++i]; break;
@@ -144,6 +152,19 @@ function createWriter(filepath, gzip) {
 }
 
 // ---- Lifecycle config toggle --------------------------------------
+
+function applyNpcStrategies(ctx) {
+  // Enable the randomStrategy flag (read on every pickNewTarget call)
+  // and retroactively assign a strategy template to every non-player
+  // bot that was created before the flag was set. Done this way so we
+  // don't have to modify createTestContext.
+  ctx.npcSettings.randomStrategy.enabled = true;
+  for (const bot of ctx.bots) {
+    if (!bot.isPlayer && !bot.npcStrategy && typeof bot.assignRandomStrategy === 'function') {
+      bot.assignRandomStrategy();
+    }
+  }
+}
 
 function applyCombatSettings(ctx, args) {
   const cs = ctx.combatSettings;
@@ -313,20 +334,43 @@ function installHooks(ctx, writer, options) {
   }
 
   // ---- Decisions (optional, VERBOSE) -----------------------------
+  // Wrap Bot.prototype.pickNewTarget so every decision — player AND
+  // NPC — produces one 'decision' event. The original logDecision
+  // function only fires for the player's strategy-mode code paths
+  // (and only when simulationSettings.loggingEnabled is on), which
+  // misses all 19 NPCs. Wrapping pickNewTarget catches everything,
+  // since both the player's strategy-mode dispatchers and the NPC
+  // paths (pickNewTargetSimple / pickTargetNPCStrategy) go through
+  // it.
+  //
+  // Note: pickNewTarget fires on a timer (reEvaluationRate, default
+  // 30 frames) plus when a bot reaches its target, so at 600k frames
+  // × 20 bots we expect ~350-400k decisions (~5 MB gzipped).
   if (options.decisions) {
-    const origLogDecision = ctx.logDecision;
-    if (typeof origLogDecision === 'function') {
-      ctx.logDecision = function(bot, action, reason, context, meta) {
-        writer.write({
-          t: 'decision',
-          f: ctx.frameCount,
-          b: bot.index,
-          act: action,
-          r: reason,
-        });
-        origLogDecision.call(this, bot, action, reason, context, meta);
-      };
-    }
+    const Bot = ctx.Bot;
+    const origPick = Bot.prototype.pickNewTarget;
+    Bot.prototype.pickNewTarget = function() {
+      origPick.call(this);
+      // Capture what was chosen. For the player, strategyMode is the
+      // high-level mode ('simple'/'advanced'/'expert') and the rich
+      // reason is in lastDecisionInfo.reason. For NPCs, npcStrategy
+      // is the template key ('gatherer'/'hunter'/'survivor'/...) or
+      // null if they fell back to pickNewTargetSimple.
+      const info = ctx.lastDecisionInfo || {};
+      const isPlayer = !!this.isPlayer;
+      writer.write({
+        t: 'decision',
+        f: ctx.frameCount,
+        b: this.index,
+        act: this.lastAction || '',
+        r: isPlayer
+          ? (info.reason || ctx.strategyMode || 'player')
+          : (this.npcStrategy || 'simple'),
+        p: isPlayer ? 1 : 0,
+        tx: Math.round(this.targetX),
+        ty: Math.round(this.targetY),
+      });
+    };
   }
 }
 
@@ -344,6 +388,7 @@ async function main() {
   const ctx = createTestContext({ seed: args.seed, botCount: args.bots, dotCount: args.dots });
   applyLifecycle(ctx, args.lifecycle);
   applyCombatSettings(ctx, args);
+  if (args.npcStrategies) applyNpcStrategies(ctx);
 
   const writer = createWriter(args.out, args.gzip);
 
@@ -358,6 +403,8 @@ async function main() {
     snapEvery: args.snapEvery,
     lifecycle: args.lifecycle,
     decisions: args.decisions,
+    npcStrategies: args.npcStrategies,
+    playerStrategyMode: ctx.strategyMode,
     combat: {
       stalemateBreaker: {
         enabled: ctx.combatSettings.stalemateBreaker.enabled,
@@ -385,6 +432,9 @@ async function main() {
       spd: b.speed, atk: b.attack, def: b.defence, lv: b.lives,
       hue: Math.round(b.hue),
       player: b.isPlayer ? 1 : 0,
+      // Strategy identifier: player uses the global strategyMode,
+      // NPCs carry their assigned template (or null if unassigned).
+      strat: b.isPlayer ? (ctx.strategyMode || 'simple') : (b.npcStrategy || 'simple'),
     })),
     dots: snapshotDots(ctx),
   });
