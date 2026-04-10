@@ -188,36 +188,47 @@ function buildCombinedScript() {
   return parts.join('\n');
 }
 
-// Wrap console to silently drop noisy diagnostics. The v11
-// bot.update() emits a "STUCK BOT DETECTED" warning when a bot is
-// stationary for 120+ frames — a useful browser diagnostic but
-// pure noise in long simulation tests. The warning is followed by
-// ~12 console.log lines with position/target/stats details.
-// Other console output passes through unchanged.
+// Wrap console to silently drop noisy diagnostics. v11's bot.update()
+// emits a "STUCK BOT DETECTED" warning when a bot is stationary for
+// 120+ frames, followed by ~13 console.log lines showing position,
+// target, stats, etc. All are useful browser diagnostics but pure
+// noise in long simulation tests.
+//
+// We match the stuck-bot block by PREFIX rather than a counting
+// window, so legitimate messages between stuck-bot follow-ups are
+// never suppressed by accident. Each follow-up line from
+// js/game.js has a distinctive two-space prefix:
+//
+//   '  Position:', '  Target:', '  Distance to target:',
+//   '  Idle time / max:', '  Last action:', '  Stats:',
+//   '  Combat cooldown:', '  Strategy mode:', '  Last context:',
+//   '  Frame:'
 function createFilteredConsole(options) {
   if (options.silent) {
     return { log() {}, warn() {}, error() {}, info() {}, debug() {} };
   }
 
-  // Number of follow-up console.log calls after the STUCK BOT warning
-  // in js/game.js. Count this if the source changes.
-  const STUCK_FOLLOWUP_LINES = 13;
-  let suppressFollowups = 0;
-
-  const inSuppressedBlock = () => suppressFollowups > 0;
-  const consumeSuppression = () => { suppressFollowups--; };
+  // Prefixes that identify stuck-bot follow-up lines, matched against
+  // the first argument when it's a string.
+  const STUCK_FOLLOWUP_PREFIXES = [
+    '  Position:',
+    '  Target:',
+    '  Distance to target:',
+    '  Idle time / max:',
+    '  Last action:',
+    '  Stats:',
+    '  Combat cooldown:',
+    '  Strategy mode:',
+    '  Last context:',
+    '  Frame:',
+  ];
 
   const shouldSuppress = (args) => {
-    // Always reset the window when we see a new STUCK BOT header.
-    // (Without this, two overlapping stuck-bot blocks would share
-    // a single suppression count and the second would leak output.)
-    if (args[0] && typeof args[0] === 'string' && args[0].includes('STUCK BOT DETECTED')) {
-      suppressFollowups = STUCK_FOLLOWUP_LINES;
-      return true;
-    }
-    if (inSuppressedBlock()) {
-      consumeSuppression();
-      return true;
+    const first = args[0];
+    if (typeof first !== 'string') return false;
+    if (first.includes('STUCK BOT DETECTED')) return true;
+    for (const prefix of STUCK_FOLLOWUP_PREFIXES) {
+      if (first === prefix || first.startsWith(prefix)) return true;
     }
     return false;
   };

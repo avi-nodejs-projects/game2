@@ -4,26 +4,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  createTestContext, runSimulation, snapshotState,
+  createTestContext, runSimulation, snapshotState, findSnapshotMismatch,
 } = require('../helpers');
 
-function findMismatch(a, b) {
-  if (a.frameCount !== b.frameCount) return `frameCount: ${a.frameCount} vs ${b.frameCount}`;
-  if (a.bots.length !== b.bots.length) return `bots.length: ${a.bots.length} vs ${b.bots.length}`;
-  if (a.dots.length !== b.dots.length) return `dots.length: ${a.dots.length} vs ${b.dots.length}`;
-  for (let i = 0; i < a.bots.length; i++) {
-    const ba = a.bots[i], bb = b.bots[i];
-    for (const f of Object.keys(ba)) {
-      if (ba[f] !== bb[f]) return `bots[${i}].${f}: ${ba[f]} vs ${bb[f]}`;
-    }
-  }
-  for (let i = 0; i < a.dots.length; i++) {
-    if (a.dots[i].x !== b.dots[i].x || a.dots[i].y !== b.dots[i].y) {
-      return `dots[${i}]: (${a.dots[i].x},${a.dots[i].y}) vs (${b.dots[i].x},${b.dots[i].y})`;
-    }
-  }
-  return null;
-}
+const findMismatch = findSnapshotMismatch;
 
 // ---- 10k-frame determinism at realistic scale ---------
 

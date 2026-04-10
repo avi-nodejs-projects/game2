@@ -35,23 +35,33 @@ function createTestContext(options = {}) {
   }
   ctx.playerBot = ctx.bots[0];
 
+  // Advance the monotonic index counter past the initial bots so
+  // reproduction offspring get unique indices. This mirrors
+  // main.js:startGame(): `nextBotIndex = BOT_COUNT;`
+  ctx.nextBotIndex = botCount;
+
   return ctx;
 }
 
 /**
- * Run the basic game loop (bot updates + collisions) for N frames.
+ * Run the basic game loop (collisions + bot updates) for N frames.
  * Does NOT run the full lifecycle updates (invincibility, starvation,
  * reproduction, packs) — use `runSimulation` for those.
+ *
+ * Order matches main.js:runGameUpdate: processCollisions first, then
+ * bot.update() for each bot. Frame index is NOT bumped (frameCount
+ * stays stable for unit tests that check timing-sensitive code like
+ * re-evaluation timers).
  *
  * @param {object} ctx - vm context from createTestContext
  * @param {number} frames - number of frames to run
  */
 function runFrames(ctx, frames) {
   for (let i = 0; i < frames; i++) {
+    ctx.processCollisions();
     for (const bot of ctx.bots) {
       bot.update();
     }
-    ctx.processCollisions();
   }
 }
 
@@ -145,22 +155,75 @@ function runSimulation(ctx, frames, options = {}) {
 
 /**
  * Snapshot the simulation state for determinism comparisons.
- * Returns an object capturing bot positions, stats, and derived state
- * that should be byte-identical across runs with the same seed.
+ * Captures every mutable field that affects either the bot's
+ * observable behavior OR the next decision cycle. Two snapshots
+ * that are byte-identical imply the simulation will produce
+ * identical next-frame results.
+ *
+ * What is NOT captured (intentional):
+ *   - Diagnostic fields (_stuckFrames, _stuckLogged, _lastX/_lastY)
+ *   - lastDecisionInfo (free-form object, only used for debug display)
+ *   - npcStrategy metadata (set at construction, effectively immutable)
  */
 function snapshotState(ctx) {
   return {
     frameCount: ctx.frameCount,
+    nextBotIndex: ctx.nextBotIndex,
     dots: ctx.yellowDots.map(d => ({ x: d.x, y: d.y })),
+    corpses: (ctx.corpses || []).map(c => ({
+      x: c.x, y: c.y, originalBotIndex: c.originalBotIndex,
+      createdAtFrame: c.createdAtFrame, nutritionValue: c.nutritionValue,
+    })),
+    packs: ctx.packs ? Array.from(ctx.packs.entries()).map(([id, pack]) => ({
+      id, founderId: pack.founderId, leaderId: pack.leaderId,
+      members: Array.from(pack.members).sort((a, b) => a - b),
+      formedAtFrame: pack.formedAtFrame,
+    })) : [],
+    protectionPairs: ctx.protectionPairs
+      ? Array.from(ctx.protectionPairs.entries()).sort().map(([k, v]) => [k, v])
+      : [],
     bots: ctx.bots.map(b => ({
       index: b.index,
+      // Position & movement
       x: b.x, y: b.y,
       targetX: b.targetX, targetY: b.targetY,
-      speed: b.speed, attack: b.attack, defence: b.defence, lives: b.lives,
-      killCount: b.killCount,
-      combatCooldown: b.combatCooldown,
       angle: b.angle,
+      idleTime: b.idleTime, maxIdle: b.maxIdle,
+      _reEvalTimer: b._reEvalTimer || 0,
+      // Stats
+      speed: b.speed, attack: b.attack, defence: b.defence, lives: b.lives,
+      initialLives: b.initialLives,
+      // Combat / damage
+      combatCooldown: b.combatCooldown,
+      justTookDamage: !!b.justTookDamage,
+      justDealtDamage: !!b.justDealtDamage,
+      damageTimer: b.damageTimer || 0,
+      damageDealtTimer: b.damageDealtTimer || 0,
+      lastAttackerIndex: b.lastAttacker ? b.lastAttacker.index : null,
+      frameLastTookDamage: b.frameLastTookDamage || 0,
+      killCount: b.killCount,
+      // Lifecycle
       lifetime: b.lifetime,
+      age: b.age || 0,
+      invincibilityFrames: b.invincibilityFrames || 0,
+      starvationCounter: b.starvationCounter || 0,
+      isStarving: !!b.isStarving,
+      starvationTickCounter: b.starvationTickCounter || 0,
+      speedBoostFrames: b.speedBoostFrames || 0,
+      // Reproduction / lineage
+      reproductionCooldown: b.reproductionCooldown || 0,
+      offspringCount: b.offspringCount || 0,
+      generation: b.generation || 0,
+      isPlayerOffspring: !!b.isPlayerOffspring,
+      playerLineage: b.playerLineage || 0,
+      // Relationships
+      parentId: b.relationships ? b.relationships.parentId : null,
+      childIds: b.relationships ? [...b.relationships.childIds].sort((a, b) => a - b) : [],
+      packId: b.relationships ? b.relationships.packId : null,
+      // AI state
+      lastAction: b.lastAction || '',
+      currentFSMState: b.currentFSMState || '',
+      // Visual (affects nothing mechanically but should match)
       hue: b.hue,
     })),
   };
@@ -239,6 +302,54 @@ function totalStats(bot) {
   return bot.speed + bot.attack + bot.defence + bot.lives;
 }
 
+/**
+ * Deep-compare two snapshots field by field. Returns a string
+ * describing the first mismatch, or null if the snapshots match.
+ *
+ * Handles primitives, arrays (by length and element equality), and
+ * nested objects (by recursive key comparison). Does NOT handle
+ * cyclic references — not needed for snapshots.
+ */
+function findSnapshotMismatch(a, b, path = '') {
+  // Primitive + null/undefined comparison
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    if (a !== b) return `${path || 'root'}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`;
+    return null;
+  }
+
+  // Array comparison
+  const aIsArr = Array.isArray(a);
+  const bIsArr = Array.isArray(b);
+  if (aIsArr !== bIsArr) {
+    return `${path}: array/non-array type mismatch`;
+  }
+  if (aIsArr) {
+    if (a.length !== b.length) {
+      return `${path}.length: ${a.length} vs ${b.length}`;
+    }
+    for (let i = 0; i < a.length; i++) {
+      const child = findSnapshotMismatch(a[i], b[i], `${path}[${i}]`);
+      if (child) return child;
+    }
+    return null;
+  }
+
+  // Object comparison — iterate union of keys to catch missing keys
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) {
+    return `${path}: key count ${aKeys.length} vs ${bKeys.length}`;
+  }
+  for (const key of aKeys) {
+    if (!(key in b)) {
+      return `${path}.${key}: missing in second snapshot`;
+    }
+    const child = findSnapshotMismatch(a[key], b[key], path ? `${path}.${key}` : key);
+    if (child) return child;
+  }
+  return null;
+}
+
 module.exports = {
   createGameContext,
   createTestContext,
@@ -246,6 +357,7 @@ module.exports = {
   runFrames,
   runSimulation,
   snapshotState,
+  findSnapshotMismatch,
   assertApprox,
   assertInRange,
   assertUnique,

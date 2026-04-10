@@ -35,10 +35,14 @@ test('scaling: timing grows with scale but stays finite', () => {
     timings[n] = Date.now() - t0;
   }
   // Just assert we didn't hit a wild blowup. Allow generous headroom.
-  assert.ok(timings[40] < timings[5] * 100,
-    `40-bot run (${timings[40]}ms) is >100x slower than 5-bot (${timings[5]}ms)`);
-  // Log the timings as a breadcrumb
-  console.log('  scaling timings:', JSON.stringify(timings));
+  // The floor on timings[5] guards against flake on very fast machines
+  // where the 5-bot run could round to 1-2ms (making the ratio meaningless).
+  const baseline = Math.max(timings[5], 10);
+  assert.ok(timings[40] < baseline * 100,
+    `40-bot run (${timings[40]}ms) is >100x slower than baseline (${baseline}ms)`);
+  // Log the timings as a breadcrumb for simulation log files.
+  // Not suppressed by the filter (not a STUCK BOT follow-up prefix).
+  console.log('scaling timings:', JSON.stringify(timings));
 });
 
 // ---- Population stable under heavy combat -------------

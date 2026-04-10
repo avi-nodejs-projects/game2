@@ -4,36 +4,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  createTestContext, runSimulation, snapshotState,
+  createTestContext, runSimulation, snapshotState, findSnapshotMismatch,
 } = require('../helpers');
 
-// Compare two snapshots field by field. Returns first mismatch
-// description, or null if they match.
-function findMismatch(a, b) {
-  if (a.frameCount !== b.frameCount) {
-    return `frameCount: ${a.frameCount} vs ${b.frameCount}`;
-  }
-  if (a.bots.length !== b.bots.length) {
-    return `bots.length: ${a.bots.length} vs ${b.bots.length}`;
-  }
-  if (a.dots.length !== b.dots.length) {
-    return `dots.length: ${a.dots.length} vs ${b.dots.length}`;
-  }
-  for (let i = 0; i < a.bots.length; i++) {
-    const ba = a.bots[i], bb = b.bots[i];
-    for (const field of Object.keys(ba)) {
-      if (ba[field] !== bb[field]) {
-        return `bots[${i}].${field}: ${ba[field]} vs ${bb[field]}`;
-      }
-    }
-  }
-  for (let i = 0; i < a.dots.length; i++) {
-    if (a.dots[i].x !== b.dots[i].x || a.dots[i].y !== b.dots[i].y) {
-      return `dots[${i}]: (${a.dots[i].x},${a.dots[i].y}) vs (${b.dots[i].x},${b.dots[i].y})`;
-    }
-  }
-  return null;
-}
+// Local alias — uses the shared deep-equality walker in helpers.js.
+// (The old inline findMismatch did shallow !== comparison, which
+// produced false negatives for array fields like childIds.)
+const findMismatch = findSnapshotMismatch;
 
 // ---- Basic determinism ----------------------------------
 
