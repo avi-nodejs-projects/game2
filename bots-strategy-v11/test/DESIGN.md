@@ -112,22 +112,30 @@ reproduction.js → relationships.js → packs.js → corpse.js → combat.js
 ### ✅ Phase 0 — Design (done when this file exists)
 - [x] Save decisions & architecture to `test/DESIGN.md`
 
-### ▶ Phase 1 — `main.js` refactor (Option B)
+### ✅ Phase 1 — `main.js` refactor (Option B) — COMPLETE
 **Goal:** Extract pure combat/collision functions from `main.js` into a new `js/combat.js`.
 
-**Functions to extract** (from `main.js` section headers):
+**Functions extracted:**
 - `checkBotDotCollision(bot, dot)`
 - `checkBotBotCollision(bot1, bot2)`
 - `handleCombat(bot1, bot2)`
-- `handleBotDeath(bot, killer)`
-- `handleAgeDeath(bot)` (if present)
+- `handleBotDeath(deadBot, killerBot)`
+- `handleAgeDeath(bot)`
+- `handleStarvationDeath(bot)`
 - `processCollisions()`
 
-**Load order update:** Add `<script src="js/combat.js"></script>` to `index.html` **before** `js/main.js` (so `main.js` can reference these functions) but **after** all model files (so `combat.js` can reference `Bot`, `yellowDots`, `lifecycleSettings`, etc.).
+**Outcome:**
+- `js/combat.js` created (463 lines)
+- `js/main.js` shrunk from 1195 → 753 lines
+- `index.html` loads `combat.js` between `bot-ai.js` and `bot-render.js`, before `main.js`
+- `codebase-map.json` updated to reflect the new file and exports
+- Committed as `bfaa8ae`
 
-**Verification:** Read the refactored files, ensure no syntax errors, ensure `main.js` no longer defines those functions, ensure `combat.js` defines them cleanly.
+**Review findings addressed:**
+- Map staleness: exports list, task pattern, dependency graph all updated
+- DESIGN.md status marker updated (this section)
 
-**Commit → push → STOP** for user review.
+**Deferred note (not a bug):** `bots`, `yellowDots`, and `camera` are declared in `main.js` but referenced by `combat.js`. This works via late-binding (function bodies resolve free variables at call time, not parse time) but is a minor dependency-inversion smell. For the upcoming test harness we will pre-populate these in the vm context; out of scope for Phase 1.
 
 ### Phase 2 — Harness + foundation tests (~1 hour)
 - `test/harness.js` — vm context loader

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "lastUpdated": "2025-12-17",
+  "lastUpdated": "2026-04-10",
   "files": {
     "js/config.js": {
       "purpose": "All game constants, settings, behavior/rule definitions, and shared state",
@@ -30,10 +30,18 @@
       }
     },
     "js/main.js": {
-      "purpose": "Game loop, camera, collision detection, and initialization",
+      "purpose": "Game loop, camera, drawing, and initialization",
       "exports": {
         "state": ["canvas", "ctx", "statsDiv", "yellowDots", "bots", "playerBot", "camera"],
-        "functions": ["worldToScreen", "isVisible", "getScale", "checkBotDotCollision", "checkBotBotCollision", "handleCombat", "handleBotDeath", "handleAgeDeath", "handleStarvationDeath", "processCollisions", "drawField", "drawWorldBoundary", "drawMinimap", "updateCamera", "updateUI", "animate", "runGameUpdate", "updateSimulationStatus", "findStrongestBot", "updateStrongestBotDisplay", "startGame", "stopSimulation", "initKeyboardControls", "init"]
+        "functions": ["worldToScreen", "isVisible", "getScale", "drawField", "drawWorldBoundary", "drawMinimap", "updateCamera", "updateUI", "animate", "runGameUpdate", "updateSimulationStatus", "findStrongestBot", "updateStrongestBotDisplay", "startGame", "stopSimulation", "initKeyboardControls", "init"]
+      }
+    },
+    "js/combat.js": {
+      "purpose": "Combat and collision system — pure-logic extracted from main.js so it can be tested headlessly",
+      "exports": {
+        "collision": ["checkBotDotCollision", "checkBotBotCollision", "processCollisions"],
+        "combat": ["handleCombat"],
+        "death": ["handleBotDeath", "handleAgeDeath", "handleStarvationDeath"]
       }
     },
     "js/lifecycle.js": {
@@ -133,7 +141,7 @@
     },
     "modify_combat": {
       "description": "Change combat mechanics, damage, or death handling",
-      "files": ["js/main.js:handleCombat+handleBotDeath", "js/game.js:evaluateCombatAdvantage"]
+      "files": ["js/combat.js:handleCombat+handleBotDeath", "js/game.js:evaluateCombatAdvantage"]
     },
     "add_npc_feature": {
       "description": "Add NPC-specific mechanics (evolution, strategies)",
@@ -187,7 +195,11 @@
     },
     "js/main.js": {
       "importedBy": [],
-      "imports": ["config.js", "game.js", "ui.js", "debug.js", "log.js", "lifecycle.js", "reproduction.js", "relationships.js", "packs.js", "corpse.js", "billboards.js"]
+      "imports": ["config.js", "game.js", "ui.js", "debug.js", "log.js", "lifecycle.js", "reproduction.js", "relationships.js", "packs.js", "corpse.js", "combat.js", "billboards.js"]
+    },
+    "js/combat.js": {
+      "importedBy": ["main.js"],
+      "imports": ["config.js", "game.js", "lifecycle.js", "relationships.js", "packs.js", "corpse.js", "log.js"]
     },
     "js/lifecycle.js": {
       "importedBy": ["main.js", "reproduction.js"],
