@@ -364,3 +364,160 @@ test('canCannibalize: packOnly=false allows non-pack targets', () => {
   ctx.lifecycleSettings.packs.cannibalism.packOnly = false;
   assert.strictEqual(ctx.canCannibalize(ctx.bots[0], ctx.bots[2]), true);
 });
+
+// ---- selectCannibalismTarget --------------------------------------
+
+test('selectCannibalismTarget: returns null for bot not in a pack', () => {
+  const ctx = createTestContext({ botCount: 1, dotCount: 0 });
+  enablePacks(ctx);
+  ctx.lifecycleSettings.packs.cannibalism.enabled = true;
+  assert.strictEqual(ctx.selectCannibalismTarget(ctx.bots[0]), null);
+});
+
+test('selectCannibalismTarget: picks weakest pack member by default', () => {
+  const ctx = createTestContext({ botCount: 4, dotCount: 0 });
+  enablePacks(ctx);
+  ctx.lifecycleSettings.packs.cannibalism.enabled = true;
+  ctx.lifecycleSettings.packs.cannibalism.targetPreference = 'weakest';
+  // Make bot[2] the weakest
+  ctx.bots[0].speed = 10; ctx.bots[0].attack = 10; ctx.bots[0].defence = 10; ctx.bots[0].lives = 10;
+  ctx.bots[1].speed = 10; ctx.bots[1].attack = 10; ctx.bots[1].defence = 10; ctx.bots[1].lives = 10;
+  ctx.bots[2].speed = 1;  ctx.bots[2].attack = 1;  ctx.bots[2].defence = 1;  ctx.bots[2].lives = 1;
+  ctx.bots[3].speed = 5;  ctx.bots[3].attack = 5;  ctx.bots[3].defence = 5;  ctx.bots[3].lives = 5;
+  ctx.createPack([ctx.bots[0], ctx.bots[1], ctx.bots[2], ctx.bots[3]]);
+  // Attacker = bot[0], should not pick self
+  const target = ctx.selectCannibalismTarget(ctx.bots[0]);
+  assert.strictEqual(target, ctx.bots[2]);
+});
+
+// ---- getTerritoryOwner --------------------------------------------
+
+test('getTerritoryOwner: returns null when no pack territories exist', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  assert.strictEqual(ctx.getTerritoryOwner(500, 500), null);
+});
+
+test('getTerritoryOwner: returns pack whose territory contains the point', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enablePacks(ctx);
+  ctx.lifecycleSettings.packs.territory.enabled = true;
+  ctx.lifecycleSettings.packs.territory.positioning.preferDotClusters = false;
+  ctx.lifecycleSettings.packs.territory.positioning.avoidEnemyClusters = false;
+  ctx.bots[0].x = 500; ctx.bots[0].y = 500;
+  ctx.bots[1].x = 600; ctx.bots[1].y = 600;
+  const pack = ctx.createPack([ctx.bots[0], ctx.bots[1]]);
+  ctx.updatePackTerritory(pack);
+  // Territory center = (550, 550), radius = 300
+  assert.strictEqual(ctx.getTerritoryOwner(600, 600), pack);
+  assert.strictEqual(ctx.getTerritoryOwner(2000, 2000), null);
+});
+
+// ---- evaluatePackFormation / handlePackFormation ------------------
+
+test('evaluatePackFormation: no-op when packs disabled', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  ctx.lifecycleSettings.packs.enabled = false;
+  const before = ctx.packs.size;
+  ctx.evaluatePackFormation();
+  assert.strictEqual(ctx.packs.size, before);
+});
+
+test('handlePackFormation: two unpaired bots form a new pack', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enablePacks(ctx);
+  const before = ctx.packs.size;
+  ctx.handlePackFormation(ctx.bots[0], ctx.bots[1]);
+  assert.strictEqual(ctx.packs.size, before + 1);
+  assert.notStrictEqual(ctx.bots[0].relationships.packId, null);
+  assert.strictEqual(
+    ctx.bots[0].relationships.packId,
+    ctx.bots[1].relationships.packId
+  );
+});
+
+test('handlePackFormation: bot joins existing pack of other', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  enablePacks(ctx);
+  const pack = ctx.createPack([ctx.bots[0], ctx.bots[1]]);
+  ctx.handlePackFormation(ctx.bots[0], ctx.bots[2]);
+  assert.strictEqual(ctx.bots[2].relationships.packId, pack.id);
+  assert.strictEqual(pack.members.size, 3);
+});
+
+test('handlePackFormation: two bots from different packs do not merge', () => {
+  const ctx = createTestContext({ botCount: 4, dotCount: 0 });
+  enablePacks(ctx);
+  const packA = ctx.createPack([ctx.bots[0], ctx.bots[1]]);
+  const packB = ctx.createPack([ctx.bots[2], ctx.bots[3]]);
+  ctx.handlePackFormation(ctx.bots[0], ctx.bots[2]);
+  // Both packs still distinct
+  assert.notStrictEqual(
+    ctx.bots[0].relationships.packId,
+    ctx.bots[2].relationships.packId
+  );
+});
+
+test('evaluatePackFormation: bots close together with similar strategy form a pack', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enablePacks(ctx);
+  ctx.lifecycleSettings.packs.formation.proximityDistance = 200;
+  ctx.lifecycleSettings.packs.formation.proximityDuration = 60;
+  ctx.lifecycleSettings.packs.formation.similarityThreshold = 0.5;
+
+  // Give both bots identical NPC strategies so similarity = 1
+  const sharedWeights = { gatherer: 50, clusterFarmer: 50, hunter: 0,
+                          opportunist: 0, survivor: 0, avenger: 0 };
+  for (let i = 0; i < 2; i++) {
+    ctx.bots[i].isPlayer = false;
+    ctx.bots[i].npcStrategy = 'custom';
+    ctx.bots[i].npcBehaviors = { ...sharedWeights };
+    for (const k of Object.keys(sharedWeights)) {
+      ctx.bots[i].npcBehaviors[k] = sharedWeights[k] > 0;
+    }
+    ctx.bots[i].npcWeights = { ...sharedWeights };
+  }
+
+  ctx.bots[0].x = 100; ctx.bots[0].y = 100;
+  ctx.bots[1].x = 150; ctx.bots[1].y = 100; // 50u apart, well within 200
+
+  // evaluatePackFormation runs once per 60 game frames; each call
+  // increments proximity by 60. Duration 60 means 1 call is enough.
+  ctx.evaluatePackFormation();
+  assert.strictEqual(ctx.packs.size, 1, 'one pack should have formed');
+});
+
+// ---- updatePacks --------------------------------------------------
+
+test('updatePacks: no-op when packs disabled', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  const pack = ctx.createPack([ctx.bots[0], ctx.bots[1]]);
+  ctx.lifecycleSettings.packs.enabled = false;
+  ctx.updatePacks();
+  // Still exists — updatePacks returned early
+  assert.strictEqual(ctx.packs.get(pack.id), pack);
+});
+
+test('updatePacks: disbands on starvation when threshold hit', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enablePacks(ctx);
+  ctx.lifecycleSettings.packs.bonds.disbandOnStarvation = true;
+  ctx.lifecycleSettings.packs.bonds.starvationDisbandThreshold = 0.5;
+  const pack = ctx.createPack([ctx.bots[0], ctx.bots[1]]);
+  ctx.bots[0].isStarving = true;
+  ctx.bots[1].isStarving = true; // 100% starving
+  ctx.updatePacks();
+  assert.strictEqual(ctx.packs.get(pack.id), undefined);
+});
+
+test('updatePacks: keeps pack alive below starvation threshold', () => {
+  const ctx = createTestContext({ botCount: 4, dotCount: 0 });
+  enablePacks(ctx);
+  ctx.lifecycleSettings.packs.bonds.disbandOnStarvation = true;
+  ctx.lifecycleSettings.packs.bonds.starvationDisbandThreshold = 0.75;
+  const pack = ctx.createPack([ctx.bots[0], ctx.bots[1], ctx.bots[2], ctx.bots[3]]);
+  ctx.bots[0].isStarving = true;
+  ctx.bots[1].isStarving = true;
+  // 2 of 4 = 50% < 75%
+  ctx.updatePacks();
+  assert.strictEqual(ctx.packs.get(pack.id), pack);
+});

@@ -397,3 +397,187 @@ test('updateMatingProgress: resets when bots drift apart', () => {
   ctx.updateMatingProgress(a, b);
   assert.strictEqual(a.matingProgress.get(b.index), undefined);
 });
+
+// ---- reproduceSexual ----------------------------------------------
+
+test('reproduceSexual: creates offspring between the two parents', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.asexual.maturityThreshold = 10;
+  const p1 = ctx.bots[0], p2 = ctx.bots[1];
+  p1.lifetime = 10000; p2.lifetime = 10000;
+  p1.x = 500; p1.y = 500;
+  p2.x = 600; p2.y = 600;
+  const before = ctx.bots.length;
+  const child = ctx.reproduceSexual(p1, p2);
+  assert.ok(child);
+  assert.strictEqual(ctx.bots.length, before + 1);
+  // Spawn position should be near the midpoint
+  assert.ok(Math.abs(child.x - 550) <= 30);
+  assert.ok(Math.abs(child.y - 550) <= 30);
+});
+
+test('reproduceSexual: both parents get cooldown', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.asexual.maturityThreshold = 10;
+  ctx.lifecycleSettings.reproduction.sexual.cooldown = 1200;
+  const p1 = ctx.bots[0], p2 = ctx.bots[1];
+  p1.lifetime = 10000; p2.lifetime = 10000;
+  ctx.reproduceSexual(p1, p2);
+  assert.strictEqual(p1.reproductionCooldown, 1200);
+  assert.strictEqual(p2.reproductionCooldown, 1200);
+});
+
+test('reproduceSexual: offspring tracks both parents', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.asexual.maturityThreshold = 10;
+  const p1 = ctx.bots[0], p2 = ctx.bots[1];
+  p1.lifetime = 10000; p2.lifetime = 10000;
+  const child = ctx.reproduceSexual(p1, p2);
+  assert.strictEqual(child.relationships.parentId, p1.index);
+  assert.strictEqual(child.relationships.secondParentId, p2.index);
+});
+
+test('reproduceSexual: both parents record mate history', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.asexual.maturityThreshold = 10;
+  const p1 = ctx.bots[0], p2 = ctx.bots[1];
+  p1.lifetime = 10000; p2.lifetime = 10000;
+  ctx.reproduceSexual(p1, p2);
+  assert.strictEqual(p1.relationships.mateHistory.length, 1);
+  assert.strictEqual(p1.relationships.mateHistory[0].botIndex, p2.index);
+  assert.strictEqual(p2.relationships.mateHistory.length, 1);
+  assert.strictEqual(p2.relationships.mateHistory[0].botIndex, p1.index);
+});
+
+test('reproduceSexual: offspring gets protection from both parents', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.asexual.maturityThreshold = 10;
+  ctx.lifecycleSettings.reproduction.offspring.protection.duration = 300;
+  const p1 = ctx.bots[0], p2 = ctx.bots[1];
+  p1.lifetime = 10000; p2.lifetime = 10000;
+  const child = ctx.reproduceSexual(p1, p2);
+  assert.strictEqual(ctx.isProtected(p1, child), true);
+  assert.strictEqual(ctx.isProtected(p2, child), true);
+});
+
+// ---- updateAllMatingProgress --------------------------------------
+
+test('updateAllMatingProgress: no-op when sexual reproduction disabled', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  ctx.lifecycleSettings.reproduction.sexual.enabled = false;
+  const a = ctx.bots[0], b = ctx.bots[1];
+  a.x = 100; a.y = 100; b.x = 110; b.y = 100;
+  a.matingProgress.clear(); b.matingProgress.clear();
+  ctx.updateAllMatingProgress();
+  assert.strictEqual(a.matingProgress.size, 0);
+});
+
+test('updateAllMatingProgress: pairs nearby bots', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.sexual.proximityDistance = 100;
+  ctx.bots[0].x = 100; ctx.bots[0].y = 100;
+  ctx.bots[1].x = 150; ctx.bots[1].y = 100; // close to bot 0
+  ctx.bots[2].x = 1800; ctx.bots[2].y = 1800; // far
+  for (const b of ctx.bots) b.matingProgress.clear();
+  ctx.updateAllMatingProgress();
+  assert.strictEqual(ctx.bots[0].matingProgress.get(ctx.bots[1].index), 1);
+  assert.strictEqual(ctx.bots[0].matingProgress.get(ctx.bots[2].index), undefined);
+});
+
+test('updateAllMatingProgress: skips pairs in combat cooldown', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  enableSexual(ctx);
+  ctx.lifecycleSettings.reproduction.sexual.proximityDistance = 100;
+  const a = ctx.bots[0], b = ctx.bots[1];
+  a.x = 100; a.y = 100; b.x = 150; b.y = 100;
+  a.combatCooldown = 30;
+  a.matingProgress.clear(); b.matingProgress.clear();
+  ctx.updateAllMatingProgress();
+  assert.strictEqual(a.matingProgress.size, 0);
+});
+
+// ---- inheritStrategy ----------------------------------------------
+
+test('inheritStrategy: no-op when neither parent has a strategy', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  const p1 = ctx.bots[0];
+  const p2 = ctx.bots[1];
+  const child = ctx.bots[2];
+  p1.isPlayer = false; p2.isPlayer = false;
+  p1.npcStrategy = null; p2.npcStrategy = null;
+  child.npcBehaviors = null;
+  ctx.inheritStrategy(child, p1, p2);
+  assert.strictEqual(child.npcBehaviors, null);
+});
+
+test('inheritStrategy: blend method averages parent weights', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  ctx.lifecycleSettings.reproduction.strategyInheritance.method = 'blend';
+  ctx.lifecycleSettings.reproduction.strategyInheritance.noise = 0;
+  ctx.lifecycleSettings.reproduction.strategyInheritance.mutationChance = 0;
+  const p1 = ctx.bots[0];
+  const p2 = ctx.bots[1];
+  const child = ctx.bots[2];
+  p1.isPlayer = false; p2.isPlayer = false;
+  p1.npcStrategy = 'custom';
+  p1.npcWeights = { gatherer: 100, clusterFarmer: 0, hunter: 0,
+                    opportunist: 0, survivor: 0, avenger: 0 };
+  p1.npcBehaviors = { gatherer: true, clusterFarmer: false, hunter: false,
+                      opportunist: false, survivor: false, avenger: false };
+  p2.npcStrategy = 'custom';
+  p2.npcWeights = { gatherer: 0, clusterFarmer: 0, hunter: 100,
+                    opportunist: 0, survivor: 0, avenger: 0 };
+  p2.npcBehaviors = { gatherer: false, clusterFarmer: false, hunter: true,
+                      opportunist: false, survivor: false, avenger: false };
+
+  ctx.inheritStrategy(child, p1, p2);
+  // Each of gatherer/hunter averaged to 50
+  assert.strictEqual(child.npcWeights.gatherer, 50);
+  assert.strictEqual(child.npcWeights.hunter, 50);
+  assert.strictEqual(child.npcWeights.clusterFarmer, 0);
+});
+
+test('inheritStrategy: randomParent method picks one parent exactly', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  ctx.lifecycleSettings.reproduction.strategyInheritance.method = 'randomParent';
+  ctx.lifecycleSettings.reproduction.strategyInheritance.mutationChance = 0;
+  const p1 = ctx.bots[0];
+  const p2 = ctx.bots[1];
+  const child = ctx.bots[2];
+  p1.isPlayer = false; p2.isPlayer = false;
+  p1.npcStrategy = 'gatherer';
+  p1.npcBehaviors = { gatherer: true };
+  p1.npcWeights = { gatherer: 100 };
+  p2.npcStrategy = 'hunter';
+  p2.npcBehaviors = { hunter: true };
+  p2.npcWeights = { hunter: 100 };
+  ctx.inheritStrategy(child, p1, p2);
+  // Weights should match exactly one parent (100 total = 100 from one parent)
+  const childSum = (child.npcWeights.gatherer || 0) + (child.npcWeights.hunter || 0);
+  assert.strictEqual(childSum, 100);
+});
+
+test('inheritStrategy: dominant method picks parent with higher stats', () => {
+  const ctx = createTestContext({ botCount: 3, dotCount: 0 });
+  ctx.lifecycleSettings.reproduction.strategyInheritance.method = 'dominant';
+  ctx.lifecycleSettings.reproduction.strategyInheritance.mutationChance = 0;
+  const p1 = ctx.bots[0];
+  const p2 = ctx.bots[1];
+  const child = ctx.bots[2];
+  p1.isPlayer = false; p2.isPlayer = false;
+  p1.speed = 1; p1.attack = 1; p1.defence = 1; p1.lives = 1; // total 4
+  p2.speed = 10; p2.attack = 10; p2.defence = 10; p2.lives = 10; // total 40
+  p1.npcStrategy = 'gatherer';
+  p1.npcBehaviors = { gatherer: true }; p1.npcWeights = { gatherer: 100 };
+  p2.npcStrategy = 'hunter';
+  p2.npcBehaviors = { hunter: true }; p2.npcWeights = { hunter: 100 };
+  ctx.inheritStrategy(child, p1, p2);
+  // Child should inherit from p2 (stronger)
+  assert.strictEqual(child.npcWeights.hunter, 100);
+});
