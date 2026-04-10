@@ -188,12 +188,55 @@ function buildCombinedScript() {
   return parts.join('\n');
 }
 
+// Wrap console to silently drop noisy diagnostics. The v11
+// bot.update() emits a "STUCK BOT DETECTED" warning when a bot is
+// stationary for 120+ frames — a useful browser diagnostic but
+// pure noise in long simulation tests. The warning is followed by
+// ~12 console.log lines with position/target/stats details.
+// Other console output passes through unchanged.
+function createFilteredConsole(options) {
+  if (options.silent) {
+    return { log() {}, warn() {}, error() {}, info() {}, debug() {} };
+  }
+
+  // Number of follow-up console.log calls after the STUCK BOT warning
+  // in js/game.js. Count this if the source changes.
+  const STUCK_FOLLOWUP_LINES = 13;
+  let suppressFollowups = 0;
+
+  const inSuppressedBlock = () => suppressFollowups > 0;
+  const consumeSuppression = () => { suppressFollowups--; };
+
+  const shouldSuppress = (args) => {
+    if (inSuppressedBlock()) {
+      consumeSuppression();
+      return true;
+    }
+    if (args[0] && typeof args[0] === 'string' && args[0].includes('STUCK BOT DETECTED')) {
+      suppressFollowups = STUCK_FOLLOWUP_LINES;
+      return true;
+    }
+    return false;
+  };
+
+  return {
+    log:   (...args) => { if (!shouldSuppress(args)) console.log(...args); },
+    warn:  (...args) => { if (!shouldSuppress(args)) console.warn(...args); },
+    error: (...args) => { if (!shouldSuppress(args)) console.error(...args); },
+    info:  (...args) => { if (!shouldSuppress(args)) console.info(...args); },
+    debug: (...args) => { if (!shouldSuppress(args)) console.debug(...args); },
+  };
+}
+
 /**
  * Create a loaded vm context with all model files executed.
  *
  * @param {object} [options]
  * @param {number} [options.seed] - Seed for deterministic Math.random.
  *   If omitted, the host Math is used.
+ * @param {boolean} [options.silent=false] - Completely silence the
+ *   vm's console (log/warn/error). Default suppresses only known
+ *   noisy diagnostics (stuck-bot warnings).
  * @returns {object} vm context object. All model globals are exposed
  *   as properties (ctx.Bot, ctx.YellowDot, ctx.bots, ctx.handleCombat, etc.)
  */
@@ -206,7 +249,7 @@ function createGameContext(options = {}) {
     Error, TypeError, RangeError,
     Infinity, NaN,
     parseInt, parseFloat, isNaN, isFinite,
-    console,
+    console: createFilteredConsole(options),
 
     // Minimal DOM stubs (no model file currently touches these at
     // load time, but we stub them for safety)

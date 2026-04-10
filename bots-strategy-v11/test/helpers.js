@@ -41,9 +41,7 @@ function createTestContext(options = {}) {
 /**
  * Run the basic game loop (bot updates + collisions) for N frames.
  * Does NOT run the full lifecycle updates (invincibility, starvation,
- * reproduction, packs) — those are triggered by main.js.runGameUpdate
- * which we don't load. Tests that need those must set up lifecycle
- * settings and call the specific update functions themselves.
+ * reproduction, packs) — use `runSimulation` for those.
  *
  * @param {object} ctx - vm context from createTestContext
  * @param {number} frames - number of frames to run
@@ -55,6 +53,117 @@ function runFrames(ctx, frames) {
     }
     ctx.processCollisions();
   }
+}
+
+/**
+ * Run the full game loop for N frames — mirrors main.js:runGameUpdate()
+ * exactly. Increments frameCount, runs all enabled lifecycle ticks
+ * (invincibility/starvation/age/protections/reproduction/packs/corpses),
+ * then processCollisions, then bot.update for every bot.
+ *
+ * Use this for integration/invariants/simulation tests that need
+ * realistic behavior over time. Unit tests can continue to use
+ * runFrames if they only need bot movement + collisions.
+ *
+ * @param {object} ctx - vm context from createTestContext
+ * @param {number} frames - number of frames to run
+ * @param {object} [options]
+ * @param {function} [options.onFrame] - optional callback(frameNum, ctx) per frame
+ */
+function runSimulation(ctx, frames, options = {}) {
+  const onFrame = options.onFrame;
+  const ls = ctx.lifecycleSettings;
+
+  for (let i = 0; i < frames; i++) {
+    ctx.frameCount++;
+
+    // Invincibility
+    if (ls.respawnInvincibility.enabled) {
+      for (const bot of ctx.bots) {
+        ctx.updateInvincibility(bot);
+      }
+    }
+
+    // Starvation (iterate in reverse so death removals don't skip bots)
+    if (ls.starvation.enabled) {
+      for (let j = ctx.bots.length - 1; j >= 0; j--) {
+        const bot = ctx.bots[j];
+        const result = ctx.updateStarvation(bot);
+        if (result === 'death') ctx.handleStarvationDeath(bot);
+      }
+    }
+
+    // Age
+    if (ls.age.enabled) {
+      for (let j = ctx.bots.length - 1; j >= 0; j--) {
+        const bot = ctx.bots[j];
+        const result = ctx.updateAge(bot);
+        if (result === 'death') ctx.handleAgeDeath(bot);
+      }
+    }
+
+    // Protection cleanup
+    if (typeof ctx.updateProtections === 'function') {
+      ctx.updateProtections();
+    }
+
+    // Reproduction cooldowns
+    if (typeof ctx.updateReproductionCooldowns === 'function') {
+      ctx.updateReproductionCooldowns();
+    }
+
+    // Asexual reproduction check
+    if (ls.reproduction.asexual.enabled) {
+      ctx.checkAsexualReproduction();
+    }
+
+    // Sexual reproduction mating progress
+    if (ls.reproduction.sexual.enabled) {
+      ctx.updateAllMatingProgress();
+    }
+
+    // Pack formation / updates (every 60 frames, matching main.js)
+    if (ls.packs.enabled && ctx.frameCount % 60 === 0) {
+      ctx.evaluatePackFormation();
+      ctx.updatePacks();
+    }
+
+    // Corpse expiry
+    if (ls.age.enabled) {
+      ctx.updateCorpses();
+    }
+
+    // Collisions + bot updates (same order as main.js)
+    ctx.processCollisions();
+    for (const bot of ctx.bots) {
+      bot.update();
+    }
+
+    if (onFrame) onFrame(ctx.frameCount, ctx);
+  }
+}
+
+/**
+ * Snapshot the simulation state for determinism comparisons.
+ * Returns an object capturing bot positions, stats, and derived state
+ * that should be byte-identical across runs with the same seed.
+ */
+function snapshotState(ctx) {
+  return {
+    frameCount: ctx.frameCount,
+    dots: ctx.yellowDots.map(d => ({ x: d.x, y: d.y })),
+    bots: ctx.bots.map(b => ({
+      index: b.index,
+      x: b.x, y: b.y,
+      targetX: b.targetX, targetY: b.targetY,
+      speed: b.speed, attack: b.attack, defence: b.defence, lives: b.lives,
+      killCount: b.killCount,
+      combatCooldown: b.combatCooldown,
+      angle: b.angle,
+      lifetime: b.lifetime,
+      hue: b.hue,
+    })),
+  };
 }
 
 // ---- Assertion helpers --------------------------------------------
@@ -135,6 +244,8 @@ module.exports = {
   createTestContext,
   resetGameState,
   runFrames,
+  runSimulation,
+  snapshotState,
   assertApprox,
   assertInRange,
   assertUnique,
