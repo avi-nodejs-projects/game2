@@ -342,25 +342,55 @@ async function main() {
 
   installHooks(ctx, writer, args);
 
-  // Run simulation with periodic snapshots
+  // Run simulation with periodic snapshots + time-based progress
   const t0 = Date.now();
   const snapEvery = args.snapEvery > 0 ? args.snapEvery : 0;
-  const progressEvery = Math.max(Math.floor(args.frames / 20), 1000);
+  let lastProgressTime = t0;
+  const PROGRESS_INTERVAL_MS = 1000;
+
+  if (!args.quiet) {
+    const features = args.lifecycle === 'none' ? 'none' : args.lifecycle;
+    process.stderr.write(
+      `Starting: ${args.bots} bots / ${args.dots} dots / ${args.frames} frames ` +
+      `/ seed ${args.seed} / lifecycle=${features}\n`
+    );
+    if (args.lifecycle === 'all' || args.lifecycle.includes('repro')) {
+      process.stderr.write(
+        `  Note: reproduction grows the population → O(N²) collision cost.\n` +
+        `  A 600k-frame run with reproduction can take many minutes.\n`
+      );
+    }
+    process.stderr.write(`  Writing to: ${args.out}\n\n`);
+  }
 
   runSimulation(ctx, args.frames, {
     onFrame: (frame, ctx) => {
       if (snapEvery > 0 && frame % snapEvery === 0) {
         writer.write({ t: 'snap', f: frame, bots: snapshotBots(ctx) });
       }
-      if (!args.quiet && frame % progressEvery === 0) {
-        const elapsed = Date.now() - t0;
-        const pct = ((frame / args.frames) * 100).toFixed(1);
+      if (args.quiet) return;
+      // Time-based progress: print at most once per PROGRESS_INTERVAL_MS
+      const now = Date.now();
+      if (now - lastProgressTime >= PROGRESS_INTERVAL_MS) {
+        lastProgressTime = now;
+        const elapsed = now - t0;
+        const pct = (frame / args.frames) * 100;
         const fps = Math.round(frame / (elapsed / 1000));
-        process.stderr.write(`  ${pct}%  frame=${frame}  ${fps} fps  events=${writer.stats.eventCount}\r`);
+        const etaSec = fps > 0 ? Math.round((args.frames - frame) / fps) : 0;
+        const etaStr = etaSec > 60
+          ? `${Math.floor(etaSec/60)}m${etaSec%60}s`
+          : `${etaSec}s`;
+        process.stderr.write(
+          `  ${pct.toFixed(1).padStart(5)}%  ` +
+          `frame=${String(frame).padStart(String(args.frames).length)}/${args.frames}  ` +
+          `bots=${ctx.bots.length}  ` +
+          `${fps} fps  ` +
+          `events=${writer.stats.eventCount}  ` +
+          `ETA ${etaStr}\n`
+        );
       }
     },
   });
-  if (!args.quiet) process.stderr.write('\n');
 
   // Final state
   writer.write({
