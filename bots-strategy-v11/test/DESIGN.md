@@ -162,14 +162,77 @@ reproduction.js → relationships.js → packs.js → corpse.js → combat.js
 
 **Smoke test:** `node test/run.js --quick` → 56/56 pass in ~240ms.
 
-### Phase 3 — Unit tests for pure methods (~3-4 hours)
-Per file listed in `unit/`.
+### ✅ Phase 3 — Unit tests for pure methods — COMPLETE
+Added 383 tests across 13 unit files + 1 helper test file:
+- `config.test.js` (32), `corpse.test.js` (26), `relationships.test.js` (31)
+- `combat.test.js` (32)
+- `bot-queries.test.js` (17), `bot-update.test.js` (18)
+- `bot-ai-context.test.js` (36), `bot-ai-simple.test.js` (22),
+  `bot-ai-advanced.test.js` (13), `bot-ai-expert.test.js` (12)
+- `lifecycle.test.js` (35), `reproduction.test.js` (43)
+- `packs.test.js` (49), `bot-npc.test.js` (17)
 
-### Phase 4 — Strategy tests (~2 hours)
-Simple/Advanced/Expert mode verification.
+Review caught 12 uncovered functions (most notably `pickNewTargetSimple`
+used by 19/20 bots) and added targeted tests. Final unit-suite: 439
+tests in ~500ms.
 
-### Phase 5 — Integration + simulation + invariants (~2-3 hours)
-Long-running stability, determinism, invariants.
+Commits: `8323d51`, `dd78fa7`, `fbcf8f1`, `33e3d9d`, `a5983fe`, `e7b28a9`,
+review fixes `92580a8`.
+
+### ✅ Phase 4 — Strategy adherence tests — COMPLETE
+Added 68 tests across 8 strategy files verifying that bots STAY IN
+CHARACTER over many decisions (not just single calls like Phase 3):
+- `simple-gatherer.test.js` (6), `simple-hunter.test.js` (7),
+  `simple-survivor.test.js` (7), `simple-weighted.test.js` (8)
+- `advanced-rules.test.js` (8), `advanced-conditions.test.js` (14)
+- `expert-fsm.test.js` (10), `adherence.test.js` (8)
+
+Approach: call strategy methods in 500-2000 iteration loops with
+`randomnessNoise = 0`, assert statistical properties of the action
+distribution. `adherence.test.js` uses the full game loop via
+`runFrames` to verify end-to-end behavior.
+
+Commits: `ca0ccf8`, `def84e6`, `15cd37b`.
+
+### ✅ Phase 5 — Integration + invariants + simulation — COMPLETE
+Added 72 tests across 13 files, plus `runSimulation` helper and a
+console filter for v11's noisy stuck-bot diagnostic.
+
+**5a integration (29 tests, 5 files, 5-10 bots):**
+- combat-scenarios, pack-formation, reproduction-cycle,
+  starvation-recovery, hunter-vs-gatherer
+
+**5b invariants (26 tests, 4 files, 10-20 bots):**
+- bounds, counts, non-negative, determinism
+
+**5c simulation (17 tests, 4 files, 20 bots / 50 dots — SLOW):**
+- stability-10k, stability-60k, determinism-long, population-stability
+
+The simulation suite is marked slow and skipped in `--quick` mode.
+Full simulation verifies the v11 defaults run cleanly for 60,000
+frames (10 minutes of game time) with every lifecycle feature on,
+and that determinism holds across 10,000-frame runs.
+
+Commits: `2d42864`, `6335446`, `f530b32`.
+
+## Final state
+
+- **579 tests** across 31 files, all passing
+- **Quick suite:** ~2.2s (562 tests, skips simulation/)
+- **Full suite:** ~48.4s
+- **Deterministic** across seeds and across runs
+- **Zero v11 source changes** (except the Phase 1 combat.js extraction)
+
+## All 6 phases complete.
+
+| Phase | Title | Tests | Key commits |
+|-------|-------|-------|-------------|
+| 0 | Design | (doc) | `bfaa8ae` |
+| 1 | combat.js extraction | (refactor) | `bfaa8ae`, `538e88c` |
+| 2 | Harness foundation | 56 | `16cc022`, `249c67f` |
+| 3 | Unit tests | +383 → 439 | 6 group commits + `92580a8` |
+| 4 | Strategy adherence | +68 → 507 | `ca0ccf8`, `def84e6`, `15cd37b` |
+| 5 | Integration/invariants/simulation | +72 → 579 | `2d42864`, `6335446`, `f530b32` |
 
 ## Pragmatic coverage guide
 
