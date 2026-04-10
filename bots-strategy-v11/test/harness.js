@@ -62,6 +62,7 @@ const LEXICAL_BINDINGS_TO_EXPOSE = [
   'STARTING_STATS', 'TOTAL_POINTS', 'MIN_STAT',
   'DEFAULT_PLAYER_STATS', 'DEFAULT_GLOBAL_SETTINGS',
   'DEFAULT_SIMULATION_SETTINGS', 'DEFAULT_NPC_SETTINGS',
+  'combatSettings', 'DEFAULT_COMBAT_SETTINGS',
   'NPC_STRATEGY_TEMPLATES',
   // config.js mutable state
   'playerStats', 'preferredBonusStat', 'strategyMode', 'nextBotIndex',

@@ -80,9 +80,25 @@ function handleCombat(bot1, bot2) {
   }
 
   // If both bots would take no damage (both have defence >= opponent's attack),
-  // use division formula and respawn both at different positions
+  // use the configured stalemate-breaker strategy.
   if (damage1 <= 0 && damage2 <= 0) {
-    // Use division formula: attack / defence
+    const sb = combatSettings && combatSettings.stalemateBreaker;
+    if (!sb || !sb.enabled || sb.formula === 'skip') {
+      // Walk past each other — no damage, no respawn, clear cooldowns
+      // so they can re-engage next frame if desired.
+      bot1.combatCooldown = 60;
+      bot2.combatCooldown = 60;
+      return;
+    }
+    if (sb.formula === 'forceRespawnBoth') {
+      // Both bots respawn, no damage, no kill credit. Good for
+      // "reset the board" style games where stalemates are bad
+      // but you don't want to invent damage.
+      handleBotDeath(bot1, null);
+      handleBotDeath(bot2, null);
+      return;
+    }
+    // Default: division formula (original v11 behavior)
     damage1 = bot1Invincible ? 0 : bot2.attack / Math.max(bot1.defence, 0.1);
     damage2 = bot2Invincible ? 0 : bot1.attack / Math.max(bot2.defence, 0.1);
 
@@ -154,7 +170,22 @@ function handleCombat(bot1, bot2) {
     return;
   }
 
-  // Normal combat: apply subtraction-based damage (only positive values hurt)
+  // Normal combat: apply subtraction-based damage (only positive values hurt).
+  // If the damage floor is enabled, a weaker attacker can still chip at
+  // a stronger defender, which prevents the "god-king" runaway where one
+  // bot becomes mathematically invincible and snowballs forever.
+  const df = combatSettings && combatSettings.damageFloor;
+  const useFloor = df && df.enabled && df.fraction > 0;
+  if (useFloor) {
+    // Each side's damage is at least (attacker.attack * fraction), unless
+    // they're invincible (which already clamped their outgoing damage to 0).
+    if (!bot2Invincible || lifecycleSettings.respawnInvincibility.canDealDamage) {
+      damage1 = Math.max(damage1, bot2.attack * df.fraction);
+    }
+    if (!bot1Invincible || lifecycleSettings.respawnInvincibility.canDealDamage) {
+      damage2 = Math.max(damage2, bot1.attack * df.fraction);
+    }
+  }
   damage1 = Math.max(0, damage1);
   damage2 = Math.max(0, damage2);
 

@@ -20,4 +20,10 @@ node_modules/
 .env.local
 
 # Test results (per-run log files, machine-readable summary)
-bots-strategy-v11/test/results/
+bots-strategy-v11/test/results/*
+# ...but DO keep the simulation-run analysis notes under results/runs/
+# so context is preserved across sessions. Raw .ndjson(.gz) data still
+# excluded — observations.md / README.md only.
+!bots-strategy-v11/test/results/runs/
+bots-strategy-v11/test/results/runs/**/*.ndjson
+bots-strategy-v11/test/results/runs/**/*.ndjson.gz

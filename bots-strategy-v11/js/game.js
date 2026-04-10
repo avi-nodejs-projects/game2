@@ -444,6 +444,16 @@ class Bot {
       stat = stats[Math.floor(Math.random() * stats.length)];
     }
 
+    // Stat cap — prevents runaway growth ("god-king" bug). Disabled by
+    // default; enable via combatSettings.statCap in config.js.
+    const cap = combatSettings && combatSettings.statCap;
+    if (cap && cap.enabled && this[stat] >= cap.maxPerStat) {
+      // Try to find any uncapped stat to grow instead.
+      const alt = stats.find(s => this[s] < cap.maxPerStat);
+      if (!alt) return; // fully capped — no growth
+      stat = alt;
+    }
+
     this[stat]++;
     if (stat === 'lives') this.initialLives++;
   }
@@ -456,6 +466,14 @@ class Bot {
       stat = this.preferredStat;
     } else {
       stat = stats[Math.floor(Math.random() * stats.length)];
+    }
+
+    // Same stat cap check as addRandomStat.
+    const cap = combatSettings && combatSettings.statCap;
+    if (cap && cap.enabled && this[stat] >= cap.maxPerStat) {
+      const alt = stats.find(s => this[s] < cap.maxPerStat);
+      if (!alt) return;
+      stat = alt;
     }
 
     this[stat] += 0.1;

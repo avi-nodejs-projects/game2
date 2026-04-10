@@ -62,6 +62,58 @@ const DEFAULT_GLOBAL_SETTINGS = {
   }
 };
 
+// ============ COMBAT SETTINGS ============
+// Tunable knobs for the combat formula and runaway prevention.
+// All defaults preserve the original v11 behavior (stalemate breaker
+// on with division formula, no damage floor, no stat cap) so existing
+// games behave identically unless features are explicitly enabled.
+const combatSettings = {
+  // Stalemate breaker fires when BOTH bots would take no damage from
+  // the primary `attack - defence` formula. Without this, two
+  // deadlocked tanks would sit in combat forever.
+  stalemateBreaker: {
+    enabled: true,            // Turn the entire stalemate branch on/off
+    formula: 'division',      // 'division' | 'forceRespawnBoth' | 'skip'
+    // division        : damage = attack / max(defence, 0.1) (v11 default)
+    // forceRespawnBoth: both bots respawn immediately, no damage dealt
+    // skip            : combat is a no-op this frame, bots walk past
+  },
+  // Minimum-damage floor — prevents a bot with overwhelming defence
+  // from becoming mathematically invincible in one-sided combats.
+  // When enabled, any attack-side damage is floored at
+  //   max(attack - defence, attack * fraction)
+  // so a weaker bot can always chip at a stronger one.
+  // Leave disabled to preserve original v11 behavior.
+  damageFloor: {
+    enabled: false,
+    fraction: 0.1             // 10% of attacker's attack as minimum
+  },
+  // Hard cap on individual stat growth from kills/dots. With the
+  // default +1 stat per kill + no cap, a winning bot's stats grow
+  // linearly without bound ("god-king" runaway). Cap prevents this.
+  // Leave disabled to preserve original v11 behavior.
+  statCap: {
+    enabled: false,
+    maxPerStat: 50            // upper bound for speed/attack/defence/lives
+  }
+};
+
+// Default combat settings for reset
+const DEFAULT_COMBAT_SETTINGS = {
+  stalemateBreaker: {
+    enabled: true,
+    formula: 'division'
+  },
+  damageFloor: {
+    enabled: false,
+    fraction: 0.1
+  },
+  statCap: {
+    enabled: false,
+    maxPerStat: 50
+  }
+};
+
 // ============ DEBUG STATE ============
 let debugMode = false;
 let showTargetLine = true;

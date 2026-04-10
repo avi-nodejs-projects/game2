@@ -428,3 +428,137 @@ test('processCollisions: no combat when bots do not touch', () => {
   ctx.processCollisions();
   assert.strictEqual(b.lives, 10);
 });
+
+// ---- combatSettings: configurable stalemate breaker ---------------
+
+function setupStalematePair(ctx) {
+  // Two perfectly matched tanks neither can damage the other
+  // via the primary subtraction formula.
+  const a = ctx.bots[0];
+  const b = ctx.bots[1];
+  a.x = 100; a.y = 100; a.size = 10;
+  b.x = 105; b.y = 100; b.size = 10;
+  a.attack = 5; a.defence = 10; a.lives = 10;
+  b.attack = 5; b.defence = 10; b.lives = 10;
+  a.combatCooldown = 0;
+  b.combatCooldown = 0;
+  return { a, b };
+}
+
+test('stalemateBreaker: division formula still works (default)', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  const { a, b } = setupStalematePair(ctx);
+  // Default: stalemateBreaker.enabled = true, formula = 'division'
+  ctx.handleCombat(a, b);
+  // damage = attack / defence = 5 / 10 = 0.5 each
+  assertApprox(a.lives, 9.5, 1e-6);
+  assertApprox(b.lives, 9.5, 1e-6);
+});
+
+test('stalemateBreaker: disabling it causes no damage on mutual block', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  ctx.combatSettings.stalemateBreaker.enabled = false;
+  const { a, b } = setupStalematePair(ctx);
+  ctx.handleCombat(a, b);
+  assert.strictEqual(a.lives, 10);
+  assert.strictEqual(b.lives, 10);
+  // Cooldowns still set so they don't fight every frame
+  assert.strictEqual(a.combatCooldown, 60);
+  assert.strictEqual(b.combatCooldown, 60);
+});
+
+test("stalemateBreaker: 'skip' formula behaves like disabled", () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  ctx.combatSettings.stalemateBreaker.formula = 'skip';
+  const { a, b } = setupStalematePair(ctx);
+  ctx.handleCombat(a, b);
+  assert.strictEqual(a.lives, 10);
+  assert.strictEqual(b.lives, 10);
+});
+
+test("stalemateBreaker: 'forceRespawnBoth' respawns both bots", () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  ctx.combatSettings.stalemateBreaker.formula = 'forceRespawnBoth';
+  const { a, b } = setupStalematePair(ctx);
+  const aStartLives = a.initialLives;
+  ctx.handleCombat(a, b);
+  // Both respawned to their initial lives
+  assert.strictEqual(a.lives, aStartLives);
+  assert.strictEqual(b.lives, b.initialLives);
+  // Neither got a kill
+  assert.strictEqual(a.killCount || 0, 0);
+  assert.strictEqual(b.killCount || 0, 0);
+});
+
+// ---- combatSettings: damage floor ---------------------------------
+
+test('damageFloor: disabled by default — invincible defender takes no damage', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  const a = ctx.bots[0];
+  const b = ctx.bots[1];
+  a.x = 100; a.y = 100; a.size = 10;
+  b.x = 105; b.y = 100; b.size = 10;
+  a.attack = 5; a.defence = 1; a.lives = 10;
+  b.attack = 100; b.defence = 1000; b.lives = 10; // mathematically invincible
+  a.combatCooldown = 0; b.combatCooldown = 0;
+  ctx.handleCombat(a, b);
+  // a takes 100 - 1 = 99 (dies), b takes max(5 - 1000, 0) = 0
+  assert.strictEqual(b.lives, 10, 'god-bot should be untouched without floor');
+});
+
+test('damageFloor: enabled lets weak attacker chip at god-bot', () => {
+  const ctx = createTestContext({ botCount: 2, dotCount: 0 });
+  ctx.combatSettings.damageFloor.enabled = true;
+  ctx.combatSettings.damageFloor.fraction = 0.1;
+  const a = ctx.bots[0];
+  const b = ctx.bots[1];
+  a.x = 100; a.y = 100; a.size = 10;
+  b.x = 105; b.y = 100; b.size = 10;
+  a.attack = 5; a.defence = 1; a.lives = 10;
+  b.attack = 100; b.defence = 1000; b.lives = 10;
+  a.combatCooldown = 0; b.combatCooldown = 0;
+  ctx.handleCombat(a, b);
+  // b should have taken max(5 - 1000, 5 * 0.1) = 0.5 damage
+  assertApprox(b.lives, 9.5, 1e-6);
+});
+
+// ---- combatSettings: stat cap -------------------------------------
+
+test('statCap: disabled by default — addRandomStat grows freely', () => {
+  const ctx = createTestContext({ botCount: 1, dotCount: 0 });
+  const b = ctx.bots[0];
+  b.speed = 100; b.attack = 100; b.defence = 100; b.lives = 100;
+  b.addRandomStat();
+  const total = b.speed + b.attack + b.defence + b.lives;
+  assert.strictEqual(total, 401, 'no cap → one stat grew to 101');
+});
+
+test('statCap: enabled stops growth of any capped stat', () => {
+  const ctx = createTestContext({ botCount: 1, dotCount: 0 });
+  ctx.combatSettings.statCap.enabled = true;
+  ctx.combatSettings.statCap.maxPerStat = 50;
+  const b = ctx.bots[0];
+  b.isPlayer = false; // avoid preferredStat branch
+  b.speed = 50; b.attack = 50; b.defence = 50; b.lives = 50;
+  // Call many times — no stat should ever exceed cap
+  for (let i = 0; i < 100; i++) b.addRandomStat();
+  assert.ok(b.speed <= 50);
+  assert.ok(b.attack <= 50);
+  assert.ok(b.defence <= 50);
+  assert.ok(b.lives <= 50);
+});
+
+test('statCap: redirects growth to uncapped stat when one is at max', () => {
+  const ctx = createTestContext({ botCount: 1, dotCount: 0 });
+  ctx.combatSettings.statCap.enabled = true;
+  ctx.combatSettings.statCap.maxPerStat = 10;
+  const b = ctx.bots[0];
+  b.isPlayer = false;
+  b.speed = 10; b.attack = 5; b.defence = 5; b.lives = 5;
+  // Repeatedly add — speed already capped, other stats should grow
+  const before = b.attack + b.defence + b.lives;
+  for (let i = 0; i < 10; i++) b.addRandomStat();
+  assert.strictEqual(b.speed, 10, 'capped stat should not grow');
+  const after = b.attack + b.defence + b.lives;
+  assert.strictEqual(after, before + 10, 'uncapped stats absorbed all growth');
+});

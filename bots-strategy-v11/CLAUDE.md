@@ -181,10 +181,38 @@ The lifecycle system adds biological mechanics to bot behavior (all features con
 ### Key Formulas
 
 - Movement speed: `0.5 + speed * 0.2`
-- Combat damage (two-tier system):
+- Combat damage (two-tier system, configurable via `combatSettings`):
   - **Primary**: `damage = opponent.attack - self.defence` (high defence can fully block weak attacks)
-  - **Stalemate breaker**: If both bots would take no damage (both have defence ≥ opponent's attack), use `damage = opponent.attack / max(self.defence, 0.1)` and respawn both bots at random positions
+  - **Stalemate breaker** (fires when both sides would take zero damage):
+    - `'division'` (default): `damage = opponent.attack / max(self.defence, 0.1)` (original v11)
+    - `'forceRespawnBoth'`: both bots respawn, no damage dealt
+    - `'skip'`: combat is a no-op this frame
+    - Set `combatSettings.stalemateBreaker.enabled = false` to disable the branch entirely.
+  - **Damage floor** (optional, off by default): when enabled, any damage is floored at `attack * damageFloor.fraction`, preventing the "god-king" runaway where a bot with overwhelming defence becomes mathematically invincible and snowballs forever. Enable via `combatSettings.damageFloor.enabled = true`.
 - Combat advantage: `ourSurvivability - theirSurvivability` where survivability = `lives / (incomingDamage + 0.1)`
+
+### Combat Settings (`combatSettings` in `js/config.js`)
+
+All knobs default to preserving original v11 behavior.
+
+```js
+combatSettings = {
+  stalemateBreaker: {
+    enabled: true,                 // branch on/off
+    formula: 'division',           // 'division' | 'forceRespawnBoth' | 'skip'
+  },
+  damageFloor: {
+    enabled: false,                // minimum damage guarantee
+    fraction: 0.1,                 // min damage = attacker.attack * fraction
+  },
+  statCap: {
+    enabled: false,                // cap stat growth per kill
+    maxPerStat: 50,                // individual stat ceiling
+  },
+};
+```
+
+`statCap` redirects growth to an uncapped stat when the rolled stat is already at max; a fully capped bot stops growing entirely. This prevents unbounded positive feedback from the `+1 stat per kill` reward loop.
 
 ## Running
 
