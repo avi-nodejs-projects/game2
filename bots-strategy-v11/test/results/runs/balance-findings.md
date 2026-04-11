@@ -160,7 +160,23 @@ accepts the new flags, and a 10k-frame smoke test with
 `--death-behavior teleport --kill-reward ratioSqrt
 --loss-penalty ratioSqrt` completes without errors.
 
-### M1 — Measurement run (answers DQ-6 / DQ-7 empirically)
+### M1 — Measurement run — COMPLETED 2026-04-11
+
+**Status:** ✅ resolved. Full analysis in
+`matrix-2026-04-11-teleport-elo/analysis.md`. Key results:
+
+- **Runaway is dead.** Top-bot kill share dropped from 25-42% →
+  10-14% across 4 seeds. Top/median stat ratio dropped from 52-89×
+  → 1.2-1.4×.
+- **Regression run E confirms** the old bug still reproduces with
+  `--death-behavior reset --kill-reward fixed`.
+- **New findings surfaced** — see DQ-8 (gatherer dot-growth
+  dominance) and DQ-9 (player simple mode broken) below.
+- **DQ-5 validated empirically** — hunters still gather 78-85% of
+  decisions under ELO because the `combat_advantage ≥ 0` gate
+  remains. They gather *more* than in baseline, because in teleport
+  mode they're usually in a weaker position relative to growing
+  gatherers.
 
 Rerun the 4-seed matrix (seeds 7/42/13/99) with the new mechanics
 enabled, so we can compare apples-to-apples against the existing
@@ -339,6 +355,57 @@ one player. It's an M3 blocker only.
 - **Decision needed later:** does starvation + teleport + ratio
   combine interestingly? Run as an additional matrix variant after
   M1 ships.
+
+### DQ-8 / DQ-DOTGROWTH: Dot-eating is the new runaway source
+
+- **Status:** pending (discovered in M1, 2026-04-11)
+- **Problem:** under teleport+ELO, combat is roughly conservation-
+  neutral (killer gain ≈ loser loss). But `Bot.addPartialRandomStat`
+  (called on every dot eaten) grants a flat `+0.1` per dot with no
+  ratio scaling or cap. Bots in teleport mode never reset, so they
+  keep eating forever — gatherers accumulate ~200-300 stats of pure
+  dot-growth and win every M1 run outright.
+- **Evidence (from matrix-2026-04-11-teleport-elo/analysis.md §6):**
+  all 4 M1 runs produced a gatherer as the top killer. System-wide
+  total stats grew from 360 to 16,821-18,427 over 600k frames; the
+  ~16,000 excess is almost entirely from dot consumption.
+- **Options:**
+  - **A. Leave alone.** Dot growth is slow and uniform — a rising
+    tide. ~250-stat gap between top and median is modest.
+  - **B. Ratio-scale dot rewards** — `addPartialRandomStat` uses
+    `0.1 * (baseline / currentTotal)` so stronger bots gain less
+    per dot. Elegant, no hard cap.
+  - **C. Hard cap on dot-sourced stats only** — gatherers stop
+    growing from dots at N.
+  - **D. Slower dot respawn** — reduce total dot income.
+  - **E. Accept gatherer archetype + fix DQ-5 as the counter** —
+    under ELO, killing a 1000-stat gatherer yields ~2×base to a
+    200-stat hunter. Gate-fix (DQ-5) would make hunters apex
+    predators that check gatherer dominance.
+- **My recommendation:** **E + DQ-5** first. If gatherers are still
+  dominant after hunters become viable, revisit.
+- **Decision needed:** pick A-E or defer until DQ-5 resolves.
+
+### DQ-9 / DQ-PLAYER-TUNING: Retune player `simple` mode defaults
+
+- **Status:** pending (discovered in M1, 2026-04-11)
+- **Problem:** player K/D in every M1 run is 0.00-0.01. The player
+  lost 3,400-3,700 teleports in 600k frames (roughly one per 3
+  seconds of game time). Compared to NPC templates the player's
+  default `behaviorWeights` are clearly miscalibrated.
+- **Context:** the player uses `pickTargetSimpleMode` with the
+  global `behaviorWeights` from `config.js`. NPC templates in
+  `NPC_STRATEGY_TEMPLATES` use per-bot tuned weights. The defaults
+  were never benchmarked against those templates.
+- **Where:** `js/config.js:behaviorWeights` + possibly
+  `js/game.js:initializeStats` for starting stats.
+- **Why it matters for multiplayer:** humans configuring their bot
+  via the Simple UI are effectively starting from the default
+  weights. Right now those defaults produce a bot that loses
+  almost every fight against any NPC template.
+- **Decision needed:** do DQ-5 first (to see if hunters become
+  viable and therefore some templates become weaker), then
+  benchmark the player weights against the tuned field.
 
 ### DQ-5: Retune hunter/aggressive template gating (deferred to M2)
 
