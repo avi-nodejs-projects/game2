@@ -215,15 +215,17 @@ and that determinism holds across 10,000-frame runs.
 
 Commits: `2d42864`, `6335446`, `f530b32`.
 
-## Final state
+## Final state (after initial 6 phases + simlog/balance follow-up)
 
-- **579 tests** across 31 files, all passing
-- **Quick suite:** ~2.2s (562 tests, skips simulation/)
-- **Full suite:** ~48.4s
+- **594 tests** across 31 files, all passing (full suite)
+- **Quick suite:** ~2.3s (577 tests, skips simulation/)
+- **Full suite:** ~52s
 - **Deterministic** across seeds and across runs
-- **Zero v11 source changes** (except the Phase 1 combat.js extraction)
+- **Targeted v11 source changes** (originally zero except the Phase 1
+  combat.js extraction; later extended in Phase 7 with `combatSettings`
+  — see note below).
 
-## All 6 phases complete.
+## Original 6 phases complete (see Phase 6 + 7 below for follow-up work).
 
 | Phase | Title | Tests | Key commits |
 |-------|-------|-------|-------------|
@@ -233,6 +235,46 @@ Commits: `2d42864`, `6335446`, `f530b32`.
 | 3 | Unit tests | +383 → 439 | 6 group commits + `92580a8` |
 | 4 | Strategy adherence | +68 → 507 | `ca0ccf8`, `def84e6`, `15cd37b` |
 | 5 | Integration/invariants/simulation | +72 → 579 | `2d42864`, `6335446`, `f530b32` |
+
+## Phase 6 — Machine-readable simulation logger (simlog)
+
+Built `test/simlog.js` as a streaming NDJSON simulation logger so long
+runs (hundreds of thousands of frames) can produce analysis-friendly
+datasets without incurring browser/canvas cost. Hooks into the same
+vm context the test harness uses. Events: meta, init, snap, eat,
+combat, kill, lifecycle (passthrough), decision, final.
+
+Key commits: `cc1052a` (initial), `2b15edc` (progress output fix),
+`70e4b8a` (CLI flags for combat settings), `3f0d891` (all-bot decision
+logging via `Bot.prototype.pickNewTarget` wrap + `--npc-strategies`).
+
+## Phase 7 — Balance findings + configurable combat
+
+Running the simlog baseline (seed 42, 600k frames) exposed a runaway
+stat-growth bug in v11 combat: once a bot's `defence` exceeds every
+opponent's `attack`, the primary `attack - defence` formula clamps to
+zero, the stalemate branch never fires (because the winner still deals
+damage), and the +1-stat-per-kill loop snowballs without bound.
+
+Fixed by adding `combatSettings` to config.js with three tunable knobs
+(all defaulting to original v11 behavior):
+
+  - `stalemateBreaker` — {enabled, formula} — division / forceRespawnBoth / skip
+  - `damageFloor`      — {enabled, fraction} — minimum damage guarantee
+  - `statCap`          — {enabled, maxPerStat} — hard per-stat ceiling
+
++9 unit tests in `unit/combat.test.js` covering each knob. These are
+the first intentional v11 source changes outside Phase 1: config.js,
+combat.js, and game.js were all modified. `harness.js` was updated to
+expose `combatSettings` via the vm bindings.
+
+Follow-up work (runs + open questions) lives in:
+- `test/results/runs/balance-findings.md` — tracked OQ/DQ items
+- `test/results/runs/matrix-2026-04-10/analysis.md` — 4-run comparison
+
+Key commits: `ece900b` (combat settings + runaway fix + baseline
+observations), `381fc6d` (4-run matrix analysis), `2d50303` (balance
+findings doc).
 
 ## Pragmatic coverage guide
 

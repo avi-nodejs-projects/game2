@@ -7,9 +7,9 @@
       "exports": {
         "constants": ["WORLD_WIDTH", "WORLD_HEIGHT", "BOT_COUNT", "DOT_COUNT", "STARTING_STATS", "TOTAL_POINTS", "MIN_STAT"],
         "state": ["playerStats", "preferredBonusStat", "strategyMode", "debugMode", "showTargetLine", "showContextValues", "lastDecisionInfo", "simulationLog", "decisionCount", "simulationRunning", "simulationPaused", "frameCount", "simulationSpeed", "behaviorWeights", "rules", "states", "transitions", "currentStateId", "selectedState", "selectedTool", "transitionStart", "corpses", "packs", "nextPackId", "protectionPairs"],
-        "settings": ["globalSettings", "simulationSettings", "npcSettings", "lifecycleSettings", "billboardSettings"],
+        "settings": ["globalSettings", "simulationSettings", "npcSettings", "lifecycleSettings", "billboardSettings", "combatSettings"],
         "definitions": ["BEHAVIORS", "SUBJECTS", "OPERATORS", "ACTIONS", "RULE_TEMPLATES", "CONDITION_PRESETS", "STATE_ACTIONS", "NPC_STRATEGY_TEMPLATES"],
-        "defaults": ["DEFAULT_PLAYER_STATS", "DEFAULT_GLOBAL_SETTINGS", "DEFAULT_SIMULATION_SETTINGS", "DEFAULT_NPC_SETTINGS", "DEFAULT_BILLBOARD_SETTINGS", "DEFAULT_RULES", "DEFAULT_STATES", "DEFAULT_TRANSITIONS"]
+        "defaults": ["DEFAULT_PLAYER_STATS", "DEFAULT_GLOBAL_SETTINGS", "DEFAULT_SIMULATION_SETTINGS", "DEFAULT_NPC_SETTINGS", "DEFAULT_BILLBOARD_SETTINGS", "DEFAULT_COMBAT_SETTINGS", "DEFAULT_RULES", "DEFAULT_STATES", "DEFAULT_TRANSITIONS"]
       }
     },
     "js/game.js": {
@@ -37,7 +37,7 @@
       }
     },
     "js/combat.js": {
-      "purpose": "Combat and collision system — pure-logic extracted from main.js so it can be tested headlessly",
+      "purpose": "Combat and collision system — pure-logic extracted from main.js so it can be tested headlessly. Behavior is tunable via combatSettings in config.js (stalemateBreaker formula, damageFloor minimum, statCap). Defaults preserve original v11 behavior.",
       "exports": {
         "collision": ["checkBotDotCollision", "checkBotBotCollision", "processCollisions"],
         "combat": ["handleCombat"],
@@ -140,8 +140,8 @@
       "files": ["js/config.js:lifecycleSettings", "js/lifecycle.js", "js/main.js:runGameUpdate", "js/ui.js:initLifecycleUI"]
     },
     "modify_combat": {
-      "description": "Change combat mechanics, damage, or death handling",
-      "files": ["js/combat.js:handleCombat+handleBotDeath", "js/game.js:evaluateCombatAdvantage"]
+      "description": "Change combat mechanics, damage, or death handling. Behavior is tunable at runtime via combatSettings (stalemateBreaker/damageFloor/statCap) — prefer adding a knob over hardcoding a new formula.",
+      "files": ["js/combat.js:handleCombat+handleBotDeath", "js/game.js:evaluateCombatAdvantage+addRandomStat", "js/config.js:combatSettings+DEFAULT_COMBAT_SETTINGS"]
     },
     "add_npc_feature": {
       "description": "Add NPC-specific mechanics (evolution, strategies)",
