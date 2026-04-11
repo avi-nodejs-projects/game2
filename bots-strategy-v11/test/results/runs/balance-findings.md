@@ -216,6 +216,19 @@ Design items that depend on the combat rules being settled:
 Not scoped yet. Will become actionable once M0-M2 converge on
 stable combat mechanics.
 
+**Known infrastructure gap (discovered 2026-04-11):** v11's `playerStats`
+is a global singleton in `js/config.js`, so any two bots flagged
+`isPlayer = true` would share the same preferred stat, starting stats,
+and reset values. The `playerBot` singleton in `main.js` (and the
+debug/ui files that read it) has the same shape. When we implement
+multiplayer, the first refactor will be converting `playerStats` into
+a per-bot config object — essentially the structure v10's
+`docs/2players.md` proposed via `playerConfigs = [{...}, {...}]`.
+This does NOT block M0-M2: the combat rewrite and measurement runs
+use the test harness with one player, and nothing in `combatSettings`,
+`combat.js`, or the new DQ-6/DQ-7 code paths assumes there's only
+one player. It's an M3 blocker only.
+
 ---
 
 ## Active open questions
