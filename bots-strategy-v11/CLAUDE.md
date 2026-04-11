@@ -4,7 +4,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Strategy Builder v11 for "Bots in a Field" - an enhanced UX/UI version based on v9. Same game logic, completely overhauled presentation with a tactical console design theme (cyan/amber accents), glassmorphism cards, custom toggle switches, lifecycle accordion, stat radar chart, event notification feed, and smooth transitions. Players configure their bot's AI before watching it compete autonomously against other bots in a 2000x2000 field.
+Strategy Builder v11 is the active working version of "Bots in a Field".
+Players configure their bot's AI before competing against 19 other bots
+in a 2000x2000 field. Three strategy modes (Simple behavior blending,
+Advanced rule lists, Expert finite state machine), a tactical-console
+UI theme, and a full lifecycle system (starvation, age, reproduction,
+packs, corpses). See the root `CLAUDE.md` for project-wide design
+direction.
+
+## Design Direction
+
+v11's combat rules are being revisited for **online multiplayer**
+compatibility (the project-wide north star). Key constraints that
+apply to any v11 mechanic change:
+
+- **Individual bot progression must persist through losses.** Full
+  stat-reset on death is going away as a default — replaced by
+  teleport + stat penalty so a losing bot keeps partial accumulated
+  power instead of restarting at baseline.
+- **Balance mechanics must be PvP-friendly.** Hard stat caps
+  (`combatSettings.statCap`), decay, starvation-as-primary-pressure
+  are available as sandbox options but are NOT the primary balance
+  tools. They get rejected for the multiplayer default because they
+  flatten progression.
+- **Combat rewards are moving toward ratio-scaled (ELO-style) gains.**
+  Winner gains scale with `victim.totalStats / killer.totalStats`,
+  and loser penalties scale with the inverse. Strong bots can't
+  profit from farming weak ones, and upsets naturally redistribute
+  power. No hard caps needed.
+- **Current `combatSettings` defaults preserve original v11 behavior**
+  (stalemate-breaker on, damageFloor off, statCap off). New
+  multiplayer mechanics (teleport, ratio rewards) ship as opt-in
+  flags and don't break existing runs.
+
+Active design decisions and open questions live in
+`bots-strategy-v11/test/results/runs/balance-findings.md`. That doc
+has the full roadmap (M0 core combat rewrite, M1 measurement run, M2
+template retuning) and tracks each design question with a `Status`
+field. Before touching combat mechanics, read it.
 
 ## Architecture
 

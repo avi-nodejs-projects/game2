@@ -4,7 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a browser-based bot simulation game called "Bots in a Field". Autonomous bot agents spawn in a bounded field, hunt for food (yellow dots), and engage in combat with each other. Bots have evolving stats (speed, attack, defence, lives) that increase through consumption and combat victories.
+"Bots in a Field" is a bot combat game. Agents in a bounded 2D field
+hunt food (yellow dots), engage in combat, and grow stats (speed,
+attack, defence, lives) through consumption and combat victories. The
+active working version is **bots-strategy-v11**; earlier versions are
+kept for reference.
+
+## Design Direction
+
+The long-term target is **online multiplayer** — human players share
+a field with NPC bots under the same mechanics. This frames every
+design decision and rules out several otherwise-reasonable balance
+mechanics:
+
+- **Progression persists through losses.** A player's bot accumulates
+  power over time, and losing a fight costs some ground, not
+  everything. Full stat-reset on death is rejected as a multiplayer
+  mechanic.
+- **Balance is PvP-friendly, not socialist.** Hard stat caps, forced
+  decay, stat inheritance, and starvation-as-primary-pressure all flatten
+  the field and hurt individual progression. They remain available as
+  sandbox / ecosystem mode options but are NOT the primary balance
+  tools.
+- **Runaway dominance is prevented by self-correcting combat rewards.**
+  Ratio-scaled (ELO-style) gains/penalties so strong bots can't farm
+  weak ones, and upsets naturally redistribute power. This is the
+  primary balance mechanism being designed.
+- **Single-player and sandbox modes remain supported** (starvation,
+  reproduction, packs, corpse food, etc.) but the primary tuning
+  target is the multiplayer case.
+
+Active design decisions and open questions live in
+`bots-strategy-v11/test/results/runs/balance-findings.md`. Any
+mechanic change to v11 combat should be evaluated against that doc.
 
 ## Architecture
 
