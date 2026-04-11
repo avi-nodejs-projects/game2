@@ -385,3 +385,133 @@ This is exactly the property we wanted from multiplayer-compatible
 balance: a persistent competitive head of the pack where your bot
 can *actually* climb, rather than a binary "I'm the god or I'm
 fresh".
+
+---
+
+# Divergence test proposal — chaos sensitivity of the simulation
+
+Added 2026-04-11 as a follow-up experiment proposal. Not yet run.
+The question being designed here:
+
+> If N runs start from the exact same set of bots at specific
+> positions with all yellow dots at the same positions, how far do
+> the attempts diverge over time?
+
+## The subtlety — what "same initial conditions" means
+
+The test harness uses a seeded PRNG (`mulberry32` via the `--seed`
+flag). Everything random in the simulation — initial bot positions,
+initial dot positions, NPC strategy assignment, AI decisions,
+damage rolls — is drawn from the same seeded stream. So "same
+initial conditions" can mean three different things, only one of
+which produces interesting divergence data:
+
+**Interpretation A — same seed, same everything.** Running 5 sims
+with `--seed 42` draws the same PRNG sequence, so every bot places
+identically, every dot places identically, AND every AI decision
+is identical. **Expected divergence: zero, forever.** The simulation
+is deterministic — guaranteed by existing tests in
+`unit/helpers.test.js` and `simulation/determinism-long.test.js`.
+Re-running the experiment would just re-verify what is already
+known. Not interesting.
+
+**Interpretation B — different seeds.** Positions differ immediately
+because each `Math.random()` call for placement draws different
+numbers. Divergence is total from frame 1 because the starting
+maps are already different. Not a controlled experiment — just 5
+different games.
+
+**Interpretation C (the interesting one) — shared initial state,
+different AI streams.** Bots and dots start at identical positions,
+but from frame 1 onward the AI decisions use different random
+numbers. This is the classic "chaos amplification" experiment:
+small differences in AI choices compound into different outcomes
+over time. Probably what the question actually intends, and
+requires a small simlog feature not yet built.
+
+## What interpretation C requires
+
+A new simlog flag: `--init-file path/to/init.json`. When set,
+simlog:
+1. Reads a saved `init` event (the one simlog already emits as
+   the second event of every run)
+2. Overrides bot positions, stats, hue, npcStrategy + dot positions
+   from the file before the simulation starts
+3. Keeps using the `--seed` value for AI randomness going forward
+
+Procedure:
+1. Run once with `--seed 42` to generate `init.json` (extract from
+   the first few NDJSON lines).
+2. Run 5 more times with
+   `--init-file init.json --seed 100/101/102/103/104`. All 5 start
+   from the same map but take different random paths after frame 1.
+3. Analyse divergence: position variance, kill-count variance,
+   ranking overlap over time.
+
+Roughly 30 lines of code in simlog, plus the analyser script.
+Small change.
+
+## Divergence metrics to report
+
+At each snapshot (every 500 frames):
+
+- **Position divergence** — for each bot index, mean distance
+  between its position in run A vs run B, averaged across all bot
+  indices and all run pairs. "How far apart is the same bot in
+  parallel universes?"
+- **Stat divergence** — for each bot index, standard deviation of
+  its total stats across the 5 runs.
+- **Kill-count variance** — same for kill counts.
+- **Top-5 Jaccard overlap** — how often do the same bots occupy
+  the top 5 across runs?
+- **Rank correlation** — Spearman's ρ between the 20-bot rankings
+  in different runs. 1.0 = identical rankings, 0 = random
+  reshuffling.
+
+The *shape* of the divergence curve is the interesting output.
+Three hypotheses:
+
+- **Linear divergence** — bots drift apart at a constant rate.
+  Would suggest combat is mostly independent of precise positions.
+- **Exponential divergence (butterfly effect)** — differences
+  compound fast, ranks scramble within a few thousand frames, and
+  by frame 50k the runs look completely unrelated. Typical of
+  chaotic systems.
+- **Bounded divergence** — runs drift apart initially but then
+  stabilise, with different bots dominating but the distribution
+  shape (e.g. top/median ratio) staying similar. Would suggest the
+  simulation has strong attractor states.
+
+Prediction: **exponential divergence under old rules (reset +
+fixed)**, because god-bot identity is determined by early random
+encounters and once someone wins the first critical fight the
+runaway locks in a different winner per run.
+**Bounded divergence under new rules (teleport + ELO)**, because
+the ELO system is self-stabilising — no matter who wins specific
+fights, the distribution shape stays roughly the same.
+
+## Pending decisions before the experiment runs
+
+1. **5 runs or 3?** Question said both. Recommend **5** — gives
+   variance estimates on the divergence metrics without being so
+   many that analysis becomes noisy.
+2. **Interpretation C confirmed?** Or actually interpretation A
+   (determinism verification, much smaller)?
+3. **Which combat mode(s) to test?** Old rules only, new rules
+   only, or **both** (5 × 2 = 10 runs, ~30 min) for a direct
+   contrast? Recommend **both** in the same analysis file.
+4. **Run length?** 600k frames like the M1 matrix is overkill if
+   divergence saturates early. Recommend **200k frames** — long
+   enough to see chaos amplify to steady state, short enough that
+   10 runs finish in ~10 min.
+5. **Fresh seeds (100-104) or reuse matrix seeds (7/42/13/99 + 100)?**
+   Recommend **fresh seeds 100-104** to avoid confusion with the
+   other matrix runs.
+
+When decisions are confirmed:
+1. Build the `--init-file` flag in simlog with unit tests
+2. Run the 5-run (or 10-run with both modes) experiment in the
+   background
+3. Write a divergence-analysis file next to the other matrix
+   results (probably in a new folder
+   `bots-strategy-v11/test/results/runs/divergence-2026-XX-XX/`)
