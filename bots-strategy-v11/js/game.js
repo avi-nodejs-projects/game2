@@ -434,7 +434,13 @@ class Bot {
   }
 
   // ============ STAT MODIFICATIONS ============
-  addRandomStat() {
+  // Add `amount` to a random stat. Player bots with a preferredStat
+  // get a 50% chance to grow that stat specifically. The default
+  // amount of 1 preserves original v11 behavior for every existing
+  // caller; DQ-7 / DQ-ELO passes a computed ratio-based amount to
+  // implement non-fixed reward modes.
+  addRandomStat(amount = 1) {
+    if (amount <= 0) return;
     const stats = ['speed', 'attack', 'defence', 'lives'];
     let stat;
 
@@ -454,8 +460,8 @@ class Bot {
       stat = alt;
     }
 
-    this[stat]++;
-    if (stat === 'lives') this.initialLives++;
+    this[stat] += amount;
+    if (stat === 'lives') this.initialLives += amount;
   }
 
   addPartialRandomStat() {
@@ -478,6 +484,27 @@ class Bot {
 
     this[stat] += 0.1;
     if (stat === 'lives') this.initialLives += 0.1;
+  }
+
+  // Subtract `amount` from a random stat, floored at the bot's
+  // starting baseline. Used by DQ-6 / DQ-TELEPORT's teleport path
+  // when a bot "loses a fight" without dying — the loser keeps their
+  // accumulated power minus a penalty. When the chosen stat is
+  // 'lives', reduces initialLives (max lives) so the bot respawns
+  // with a smaller capacity next time.
+  applyLossPenalty(amount) {
+    if (amount <= 0) return;
+    const stats = ['speed', 'attack', 'defence', 'lives'];
+    const stat = stats[Math.floor(Math.random() * stats.length)];
+    const minValue = this.isPlayer ? playerStats[stat] : STARTING_STATS[stat];
+
+    if (stat === 'lives') {
+      // Reduce max lives (initialLives). Current lives will be
+      // refilled to this value by the teleport path in combat.js.
+      this.initialLives = Math.max(minValue, this.initialLives - amount);
+    } else {
+      this[stat] = Math.max(minValue, this[stat] - amount);
+    }
   }
 
   applyRespawnPenalty() {

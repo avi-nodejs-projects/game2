@@ -63,11 +63,66 @@ const DEFAULT_GLOBAL_SETTINGS = {
 };
 
 // ============ COMBAT SETTINGS ============
-// Tunable knobs for the combat formula and runaway prevention.
-// All defaults preserve the original v11 behavior (stalemate breaker
-// on with division formula, no damage floor, no stat cap) so existing
-// games behave identically unless features are explicitly enabled.
+// Tunable knobs for the combat formula, runaway prevention, and the
+// death/reward model. All defaults preserve original v11 behavior
+// (reset on death, fixed +1 reward, no loss penalty, stalemate breaker
+// on, no damage floor, no stat cap) so existing games behave
+// identically unless features are explicitly enabled.
+//
+// The deathBehavior + killReward + lossPenalty knobs together
+// implement the "teleport + ELO" model described in
+// bots-strategy-v11/test/results/runs/balance-findings.md (DQ-6, DQ-7).
 const combatSettings = {
+  // What happens to a bot whose lives reach 0 (from combat or
+  // starvation). Age death has its own separate deathBehavior knob
+  // in lifecycleSettings.age, unrelated to this.
+  //
+  //   'reset'    — (v11 default) full stat reset, respawn at random
+  //                 location. Legacy single-player feel.
+  //   'teleport' — preserve stats/killCount/generation/age/
+  //                 relationships, refill lives to (possibly reduced)
+  //                 initialLives, apply lossPenalty to a random stat.
+  //                 The bot "relocated after a loss" rather than
+  //                 "died". Multiplayer-friendly.
+  //   'remove'   — remove bot from game entirely (ecosystem mode).
+  //                 Same semantics as lifecycleSettings.age.deathBehavior='remove'.
+  deathBehavior: 'reset',
+
+  // How much stat gain to award the killer. With 'fixed', every kill
+  // gives `base` — original v11 behavior. With the ratio modes, the
+  // reward scales on how strong the victim was relative to the
+  // killer — strong victim + weak killer = big reward (upset).
+  //
+  //   'fixed'       — killer gains exactly `base` (v11 default: 1)
+  //   'ratioLinear' — killer gains base * (victim.total / killer.total)
+  //   'ratioSqrt'   — killer gains base * sqrt(victim.total / killer.total)
+  //   'elo'         — chess-style:
+  //                    expected = 1/(1 + 10^((victim-killer)/eloScale))
+  //                    gain = base * 2 * (1 - expected)
+  //                   At parity (equal totals), gain = base. Much
+  //                   stronger killer → gain ≈ 0 (no bully reward).
+  //                   Much weaker killer → gain ≈ 2*base (upset).
+  killReward: {
+    mode: 'fixed',            // 'fixed' | 'ratioLinear' | 'ratioSqrt' | 'elo'
+    base: 1,                  // reward for equal-strength kill
+    eloScale: 400             // chess-standard divisor — smaller = more volatile
+  },
+
+  // Loss penalty applied to the loser of a combat. Only applied when
+  // deathBehavior is 'teleport' — the 'reset' path already wipes
+  // stats so the penalty would be lost. Modes mirror killReward plus
+  // a 'none' option (default) which skips the penalty entirely.
+  //
+  // When both killReward and lossPenalty use the same mode + base,
+  // total stats across the system are conserved: killer's gain
+  // equals loser's loss per combat. This is the self-balancing
+  // property that prevents runaway growth without hard caps.
+  lossPenalty: {
+    mode: 'none',             // 'none' | 'fixed' | 'ratioLinear' | 'ratioSqrt' | 'elo'
+    base: 1,
+    eloScale: 400
+  },
+
   // Stalemate breaker fires when BOTH bots would take no damage from
   // the primary `attack - defence` formula. Without this, two
   // deadlocked tanks would sit in combat forever.
@@ -92,6 +147,8 @@ const combatSettings = {
   // default +1 stat per kill + no cap, a winning bot's stats grow
   // linearly without bound ("god-king" runaway). Cap prevents this.
   // Leave disabled to preserve original v11 behavior.
+  // Under the teleport + ELO model, cap is unnecessary for balance
+  // but can still serve as a safety ceiling.
   statCap: {
     enabled: false,
     maxPerStat: 50            // upper bound for speed/attack/defence/lives
@@ -100,6 +157,17 @@ const combatSettings = {
 
 // Default combat settings for reset
 const DEFAULT_COMBAT_SETTINGS = {
+  deathBehavior: 'reset',
+  killReward: {
+    mode: 'fixed',
+    base: 1,
+    eloScale: 400
+  },
+  lossPenalty: {
+    mode: 'none',
+    base: 1,
+    eloScale: 400
+  },
   stalemateBreaker: {
     enabled: true,
     formula: 'division'

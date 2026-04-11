@@ -31,6 +31,25 @@
 //                       e.g. --stat-cap 50 → individual stats can't exceed 50
 //   --stalemate MODE    stalemateBreaker formula: division|forceRespawnBoth|skip|off
 //                       (default: division — original v11 behavior)
+//   --death-behavior X  combatSettings.deathBehavior: reset|teleport|remove
+//                       (default: reset — original v11 behavior)
+//                       teleport = DQ-6: preserve stats+relationships, refill
+//                         lives to (possibly reduced) initialLives, apply
+//                         lossPenalty to a random stat
+//                       remove   = ecosystem mode, bot gone from game
+//   --kill-reward MODE  combatSettings.killReward.mode:
+//                       fixed|ratioLinear|ratioSqrt|elo (default: fixed)
+//                       DQ-7 / DQ-ELO formulas for scaling reward on
+//                       opponent strength ratio.
+//   --loss-penalty MODE combatSettings.lossPenalty.mode:
+//                       none|fixed|ratioLinear|ratioSqrt|elo (default: none)
+//                       Same modes as kill-reward. Only applied when
+//                       death-behavior=teleport.
+//   --reward-base N     base reward value used by all reward/penalty
+//                       formulas (default: 1 — matches +1 per kill)
+//   --elo-scale N       eloScale divisor for the 'elo' formula
+//                       (default: 400 — chess-standard). Smaller values
+//                       produce sharper upset/bully curves.
 //   --quiet             suppress progress output
 //   --help              show this help
 //
@@ -60,6 +79,11 @@ function parseArgs(argv) {
     damageFloor: null,     // null = keep config default (off)
     statCap: null,
     stalemate: null,
+    deathBehavior: null,
+    killReward: null,
+    lossPenalty: null,
+    rewardBase: null,
+    eloScale: null,
     quiet: false,
   };
   for (let i = 2; i < argv.length; i++) {
@@ -78,6 +102,11 @@ function parseArgs(argv) {
       case '--damage-floor': args.damageFloor = parseFloat(argv[++i]); break;
       case '--stat-cap':     args.statCap = parseInt(argv[++i], 10); break;
       case '--stalemate':    args.stalemate = argv[++i]; break;
+      case '--death-behavior': args.deathBehavior = argv[++i]; break;
+      case '--kill-reward':    args.killReward = argv[++i]; break;
+      case '--loss-penalty':   args.lossPenalty = argv[++i]; break;
+      case '--reward-base':    args.rewardBase = parseFloat(argv[++i]); break;
+      case '--elo-scale':      args.eloScale = parseFloat(argv[++i]); break;
       case '--quiet':      args.quiet = true; break;
       case '--help': case '-h':
         printHelp(); process.exit(0);
@@ -185,6 +214,38 @@ function applyCombatSettings(ctx, args) {
     } else {
       throw new Error(`Unknown --stalemate value: ${args.stalemate}`);
     }
+  }
+
+  // DQ-6 / DQ-TELEPORT
+  if (args.deathBehavior !== null) {
+    if (!['reset', 'teleport', 'remove'].includes(args.deathBehavior)) {
+      throw new Error(`Unknown --death-behavior value: ${args.deathBehavior}`);
+    }
+    cs.deathBehavior = args.deathBehavior;
+  }
+
+  // DQ-7 / DQ-ELO
+  const REWARD_MODES = ['fixed', 'ratioLinear', 'ratioSqrt', 'elo'];
+  const PENALTY_MODES = ['none', 'fixed', 'ratioLinear', 'ratioSqrt', 'elo'];
+  if (args.killReward !== null) {
+    if (!REWARD_MODES.includes(args.killReward)) {
+      throw new Error(`Unknown --kill-reward value: ${args.killReward} (want one of ${REWARD_MODES.join('|')})`);
+    }
+    cs.killReward.mode = args.killReward;
+  }
+  if (args.lossPenalty !== null) {
+    if (!PENALTY_MODES.includes(args.lossPenalty)) {
+      throw new Error(`Unknown --loss-penalty value: ${args.lossPenalty} (want one of ${PENALTY_MODES.join('|')})`);
+    }
+    cs.lossPenalty.mode = args.lossPenalty;
+  }
+  if (args.rewardBase !== null) {
+    cs.killReward.base = args.rewardBase;
+    cs.lossPenalty.base = args.rewardBase;
+  }
+  if (args.eloScale !== null) {
+    cs.killReward.eloScale = args.eloScale;
+    cs.lossPenalty.eloScale = args.eloScale;
   }
 }
 
@@ -406,6 +467,17 @@ async function main() {
     npcStrategies: args.npcStrategies,
     playerStrategyMode: ctx.strategyMode,
     combat: {
+      deathBehavior: ctx.combatSettings.deathBehavior,
+      killReward: {
+        mode: ctx.combatSettings.killReward.mode,
+        base: ctx.combatSettings.killReward.base,
+        eloScale: ctx.combatSettings.killReward.eloScale,
+      },
+      lossPenalty: {
+        mode: ctx.combatSettings.lossPenalty.mode,
+        base: ctx.combatSettings.lossPenalty.base,
+        eloScale: ctx.combatSettings.lossPenalty.eloScale,
+      },
       stalemateBreaker: {
         enabled: ctx.combatSettings.stalemateBreaker.enabled,
         formula: ctx.combatSettings.stalemateBreaker.formula,

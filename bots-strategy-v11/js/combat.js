@@ -16,6 +16,85 @@
 //   - logEvent, logBotRespawn            (log.js)
 //   - showEventNotification              (ui-notifications.js)
 
+// ============ STAT REWARD / PENALTY MATH (DQ-7 / DQ-ELO) ============
+//
+// Compute the stat amount to award the killer for a winning combat.
+// Defaults to the fixed `+1 per kill` v11 behavior; opt in to
+// ratioLinear / ratioSqrt / elo via combatSettings.killReward.mode.
+//
+// All modes return `base` when the two bots have equal total stats.
+// Stronger victim → bigger reward (upset), weaker victim → smaller.
+// The 'elo' mode is chess-style:
+//   expected = 1/(1 + 10^((victim-killer)/eloScale))
+//   delta    = base * 2 * (1 - expected)
+// which gives delta ≈ 0 for a dominant killer (no bully reward) and
+// delta ≈ 2*base for an upset.
+function computeKillReward(killer, victim) {
+  const cfg = combatSettings && combatSettings.killReward;
+  if (!cfg) return 1;
+  const base = cfg.base || 0;
+  if (cfg.mode === 'fixed' || !cfg.mode) return base;
+
+  const killerTotal = killer.speed + killer.attack + killer.defence + killer.lives;
+  const victimTotal = victim.speed + victim.attack + victim.defence + victim.lives;
+  if (killerTotal <= 0) return base;
+
+  switch (cfg.mode) {
+    case 'ratioLinear': {
+      return base * (victimTotal / killerTotal);
+    }
+    case 'ratioSqrt': {
+      return base * Math.sqrt(victimTotal / killerTotal);
+    }
+    case 'elo': {
+      const eloScale = cfg.eloScale || 400;
+      const expected = 1 / (1 + Math.pow(10, (victimTotal - killerTotal) / eloScale));
+      return base * 2 * (1 - expected);
+    }
+    default:
+      return base;
+  }
+}
+
+// Compute the stat amount to subtract from the loser. Only meaningful
+// when deathBehavior is 'teleport' — the 'reset' path wipes stats so
+// any penalty would be lost. Default mode 'none' returns 0 and is
+// what the v11 reset mechanic uses.
+//
+// When killReward and lossPenalty are configured with the same mode +
+// base, symmetric formulas (ratioLinear / ratioSqrt / elo) guarantee
+// `computeKillReward(k, v) === computeLossPenalty(v, k)` so total
+// stats across the system are conserved across any combat. That is
+// the self-balancing property that replaces hard caps.
+function computeLossPenalty(loser, killer) {
+  const cfg = combatSettings && combatSettings.lossPenalty;
+  if (!cfg || cfg.mode === 'none' || !cfg.mode) return 0;
+  const base = cfg.base || 0;
+  if (cfg.mode === 'fixed') return base;
+
+  const loserTotal = loser.speed + loser.attack + loser.defence + loser.lives;
+  const killerTotal = killer.speed + killer.attack + killer.defence + killer.lives;
+  if (killerTotal <= 0) return 0;
+
+  switch (cfg.mode) {
+    case 'ratioLinear': {
+      return base * (loserTotal / killerTotal);
+    }
+    case 'ratioSqrt': {
+      return base * Math.sqrt(loserTotal / killerTotal);
+    }
+    case 'elo': {
+      // Loser's expected win probability. Symmetric with killer's
+      // expected: killer_expected + loser_expected == 1.
+      const eloScale = cfg.eloScale || 400;
+      const loserExpected = 1 / (1 + Math.pow(10, (killerTotal - loserTotal) / eloScale));
+      return base * 2 * loserExpected;
+    }
+    default:
+      return base;
+  }
+}
+
 // ============ COLLISION DETECTION ============
 function checkBotDotCollision(bot, dot) {
   const dx = bot.x - dot.x;
@@ -147,15 +226,21 @@ function handleCombat(bot1, bot2) {
       handleBotDeath(bot2, null);
     } else if (bot1Dead) {
       bot2.killCount = (bot2.killCount || 0) + 1;
-      handleBotDeath(bot1, bot2);
-      bot2.addRandomStat();
+      // Compute reward + penalty BEFORE handleBotDeath so we use the
+      // pre-death stats of both bots (reset path will wipe bot1's).
+      const reward1 = computeKillReward(bot2, bot1);
+      const penalty1 = computeLossPenalty(bot1, bot2);
+      bot2.addRandomStat(reward1);
+      handleBotDeath(bot1, bot2, penalty1);
       if (lifecycleSettings.starvation.enabled && lifecycleSettings.starvation.resetConditions.onKill) {
         if (typeof resetStarvationTimer === 'function') resetStarvationTimer(bot2, 'kill');
       }
     } else if (bot2Dead) {
       bot1.killCount = (bot1.killCount || 0) + 1;
-      handleBotDeath(bot2, bot1);
-      bot1.addRandomStat();
+      const reward2 = computeKillReward(bot1, bot2);
+      const penalty2 = computeLossPenalty(bot2, bot1);
+      bot1.addRandomStat(reward2);
+      handleBotDeath(bot2, bot1, penalty2);
       if (lifecycleSettings.starvation.enabled && lifecycleSettings.starvation.resetConditions.onKill) {
         if (typeof resetStarvationTimer === 'function') resetStarvationTimer(bot1, 'kill');
       }
@@ -235,26 +320,25 @@ function handleCombat(bot1, bot2) {
     handleBotDeath(bot1, null);
     handleBotDeath(bot2, null);
   } else if (bot1Dead) {
-    const bot1LostLives = bot1LivesBefore - bot1.lives;
-    const bot2LostLives = bot2LivesBefore - bot2.lives;
-
-    // bot2 killed bot1
+    // bot2 killed bot1. Compute reward + penalty BEFORE handleBotDeath
+    // so we use pre-death stats (the 'reset' path wipes bot1's).
     bot2.killCount = (bot2.killCount || 0) + 1;
-    handleBotDeath(bot1, bot2);
-    bot2.addRandomStat();
+    const reward = computeKillReward(bot2, bot1);
+    const penalty = computeLossPenalty(bot1, bot2);
+    bot2.addRandomStat(reward);
+    handleBotDeath(bot1, bot2, penalty);
 
     // Reset starvation on kill
     if (lifecycleSettings.starvation.enabled && lifecycleSettings.starvation.resetConditions.onKill) {
       if (typeof resetStarvationTimer === 'function') resetStarvationTimer(bot2, 'kill');
     }
   } else if (bot2Dead) {
-    const bot1LostLives = bot1LivesBefore - bot1.lives;
-    const bot2LostLives = bot2LivesBefore - bot2.lives;
-
     // bot1 killed bot2
     bot1.killCount = (bot1.killCount || 0) + 1;
-    handleBotDeath(bot2, bot1);
-    bot1.addRandomStat();
+    const reward = computeKillReward(bot1, bot2);
+    const penalty = computeLossPenalty(bot2, bot1);
+    bot1.addRandomStat(reward);
+    handleBotDeath(bot2, bot1, penalty);
 
     // Reset starvation on kill
     if (lifecycleSettings.starvation.enabled && lifecycleSettings.starvation.resetConditions.onKill) {
@@ -263,8 +347,104 @@ function handleCombat(bot1, bot2) {
   }
 }
 
-// Handle bot death with new NPC mechanics
-function handleBotDeath(deadBot, killerBot) {
+// Handle bot death with new NPC mechanics.
+//
+// Behavior depends on combatSettings.deathBehavior (DQ-6 / DQ-TELEPORT):
+//   'reset'    — (v11 default) full stat reset, respawn at random
+//                 location. Legacy behavior.
+//   'teleport' — preserve stats, killCount, generation, age, and all
+//                 relationships. Refill lives to (possibly reduced)
+//                 initialLives. Apply `lossPenaltyAmount` to a random
+//                 stat via Bot.applyLossPenalty. The bot "relocated
+//                 after a loss" rather than "died".
+//   'remove'   — remove bot from game entirely (ecosystem mode).
+//
+// `lossPenaltyAmount` is the pre-computed penalty from
+// computeLossPenalty(loser, killer); ignored in 'reset' and 'remove'
+// modes since stats get wiped/removed anyway.
+function handleBotDeath(deadBot, killerBot, lossPenaltyAmount = 0) {
+  const deathBehavior = (combatSettings && combatSettings.deathBehavior) || 'reset';
+
+  // ---- 'remove' path: remove from game entirely -----------------
+  if (deathBehavior === 'remove') {
+    if (typeof handlePackMemberRespawn === 'function') {
+      handlePackMemberRespawn(deadBot);
+    }
+    if (typeof clearRelationshipsOnDeath === 'function') {
+      clearRelationshipsOnDeath(deadBot);
+    }
+    for (const b of bots) {
+      if (b === deadBot) continue;
+      if (b.matingProgress) b.matingProgress.delete(deadBot.index);
+      if (b.packProximityMap) b.packProximityMap.delete(deadBot.index);
+    }
+    const idx = bots.indexOf(deadBot);
+    if (idx > -1) bots.splice(idx, 1);
+    // Update camera if it was following this bot
+    if (camera.followBot === deadBot) {
+      camera.followIndex = 0;
+      camera.followBot = bots[0] || null;
+    } else if (camera.followBot) {
+      camera.followIndex = bots.indexOf(camera.followBot);
+    }
+    if (typeof showEventNotification === 'function' && killerBot) {
+      const killerName = killerBot.isPlayer ? 'Your bot' : `Bot #${killerBot.index}`;
+      const deadName = deadBot.isPlayer ? 'Your bot' : `Bot #${deadBot.index}`;
+      showEventNotification('kill', `${killerName} eliminated ${deadName}`);
+    }
+    return;
+  }
+
+  // ---- 'teleport' path: preserve stats + relationships ---------
+  if (deathBehavior === 'teleport') {
+    // Apply loss penalty (if any) BEFORE refilling lives, so if the
+    // penalty lands on 'lives' stat it shrinks initialLives and the
+    // refill below uses the new value.
+    if (lossPenaltyAmount > 0 && typeof deadBot.applyLossPenalty === 'function') {
+      deadBot.applyLossPenalty(lossPenaltyAmount);
+    }
+
+    // Relocate to random point on the map
+    deadBot.spawnAtRandom();
+
+    // Refill lives to current max (possibly reduced by penalty above)
+    deadBot.lives = deadBot.initialLives;
+
+    // Clear transient combat state. DO NOT clear killCount,
+    // generation, age, packId, parentId, childIds — the bot is
+    // preserving its history.
+    deadBot.combatCooldown = 0;
+    deadBot.justTookDamage = false;
+    deadBot.damageTimer = 0;
+    deadBot.justDealtDamage = false;
+    deadBot.damageDealtTimer = 0;
+    deadBot.lastAttacker = null;
+    deadBot.frameLastTookDamage = 0;
+    deadBot.speedBoostFrames = 0;
+
+    // Apply invincibility on "re-entry" if enabled — same as respawn
+    // grace period, gives the bot a few frames to orient.
+    if (lifecycleSettings.respawnInvincibility.enabled) {
+      if (typeof applyInvincibility === 'function') {
+        applyInvincibility(deadBot, lifecycleSettings.respawnInvincibility.duration);
+      }
+    }
+
+    // Log it as a respawn event (same consumer-side data, different
+    // semantics — simlog analysis can distinguish via combatSettings
+    // recorded in the meta event).
+    if (typeof logBotRespawn === 'function') {
+      logBotRespawn(deadBot);
+    }
+    if (typeof showEventNotification === 'function' && killerBot) {
+      const killerName = killerBot.isPlayer ? 'Your bot' : `Bot #${killerBot.index}`;
+      const deadName = deadBot.isPlayer ? 'Your bot' : `Bot #${deadBot.index}`;
+      showEventNotification('kill', `${killerName} defeated ${deadName}`);
+    }
+    return;
+  }
+
+  // ---- 'reset' path: original v11 behavior ---------------------
   // Handle pack membership on death
   if (typeof handlePackMemberRespawn === 'function') {
     handlePackMemberRespawn(deadBot);
