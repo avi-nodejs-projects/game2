@@ -1,0 +1,1880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stack</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: monospace; }
+  #game-container {
+    width: 100%; height: 100%;
+    transition: transform 0.1s ease-out;
+    transform-origin: center center;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="canvas"></canvas>
+</div>
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const CONFIG = {
+  // Round timing
+  roundDuration: 8,
+  postClickPause: 0.5,
+  swapAnimationDuration: 0.5,
+  postLevel7DurationReduction: 0.3,
+  minRoundDuration: 2,
+
+  // Value regeneration on swap
+  regenerationChance: 0.6,
+
+  // Number generation
+  minOperand: 100,
+  maxOperand: 999,
+  operationMix: 0.5,
+
+  // Scoring
+  basePoints: 100,
+  pointsPerLevel: 50,
+  ignorePointsFraction: 0.5,
+  correctClickAdvancement: 1.0,
+  correctIgnoreAdvancement: 0.5,
+  pointsToAdvance: 2.0,
+  mistakesToDemote: 3,
+
+  // Game over
+  baseMistakeBudget: 4,
+  mistakeBudgetPerLevel: 2,
+
+  // Result-spread escalation past max defined level
+  // At each post-max level, results within a frame get clustered tighter
+  baseResultSpread: 600,
+  spreadReductionPerLevel: 80,
+  minResultSpread: 80,
+  minPairDifference: 20,
+
+  // Probability that a grid is forced into a "no valid pair" (ignore-correct)
+  // state. Natural generation nearly always produces click-correct grids at
+  // 2×3+, so without this the game degenerates into mindless clicking.
+  forceIgnoreProbability: 0.4,
+
+  // Difficulty
+  difficulties: [
+    { label: 'EASY',   startLevel: 1 },
+    { label: 'MEDIUM', startLevel: 4 },
+    { label: 'HARD',   startLevel: 6 },
+  ],
+
+  // Level definitions
+  levels: [
+    { rows: 2, cols: 2, framing: 'grid' },
+    { rows: 2, cols: 3, framing: 'grid' },
+    { rows: 2, cols: 4, framing: 'grid' },
+    { rows: 3, cols: 2, framing: 'grid' },
+    { rows: 3, cols: 3, framing: 'grid' },
+    { rows: 3, cols: 3, framing: 'columns' },
+    { rows: 3, cols: 4, framing: 'columns' },
+  ],
+
+  // Visual
+  cellWidthFraction: 0.16,
+  cellHeightFraction: 0.10,
+  cellGapFraction: 0.02,
+  framePadding: 16,
+  tiltAngle: [2, 4],
+  mistakeFeedbackDuration: 0.4,
+  notificationDuration: 1.5,
+  notificationFloatSpeed: 50,
+  smileySize: 36,
+
+  // Toolbar
+  toolbarButtonW: 64,
+  toolbarButtonH: 32,
+  toolbarGap: 8,
+  toolbarTopMargin: 12,
+};
+
+// ============================================================
+// UTILS
+// ============================================================
+const Utils = {
+  randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; },
+  randFloat(min, max) { return Math.random() * (max - min) + min; },
+  randFromRange(arr) { return this.randFloat(arr[0], arr[1]); },
+  randIntFromRange(arr) { return this.randInt(arr[0], arr[1]); },
+  chance(p) { return Math.random() < p; },
+  clamp(v, min, max) { return Math.max(min, Math.min(max, v)); },
+  lerp(a, b, t) { return a + (b - a) * t; },
+  pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; },
+  shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  },
+  easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); },
+};
+
+// ============================================================
+// PALETTES
+// ============================================================
+const PALETTES = [
+  {
+    name: 'Synthwave',
+    bg: '#1a0a2e', cell: '#2a1845', cellText: '#ffffff', frame: '#ff6ec7',
+    frameGlow: '#ff6ec7', accent: '#b967ff', highlight: '#f5e642',
+    text: '#ffffff', notifGood: '#00ff88', notifBad: '#ff3366', op: '#00fff7',
+  },
+  {
+    name: 'Ocean',
+    bg: '#0b1628', cell: '#152538', cellText: '#e0f0ff', frame: '#3a86a8',
+    frameGlow: '#5fb8e0', accent: '#1e6091', highlight: '#f0e68c',
+    text: '#d0e8f0', notifGood: '#00e09e', notifBad: '#e05050', op: '#00d4aa',
+  },
+  {
+    name: 'Sunset',
+    bg: '#1c0f0a', cell: '#2c1810', cellText: '#ffeedd', frame: '#e07040',
+    frameGlow: '#ffc8dd', accent: '#ff7b00', highlight: '#ffd166',
+    text: '#ffeedd', notifGood: '#a8e06e', notifBad: '#ff4444', op: '#ef476f',
+  },
+  {
+    name: 'Forest',
+    bg: '#0d1f0d', cell: '#162a16', cellText: '#e0f0d0', frame: '#5c8a4d',
+    frameGlow: '#a3d977', accent: '#2e6b2e', highlight: '#f0e68c',
+    text: '#d0e0c0', notifGood: '#88dd55', notifBad: '#cc5544', op: '#d4a86a',
+  },
+  {
+    name: 'Midnight',
+    bg: '#0a0e1a', cell: '#141a2a', cellText: '#e0e8ff', frame: '#4466aa',
+    frameGlow: '#88bbff', accent: '#2244aa', highlight: '#ffd700',
+    text: '#c0d0f0', notifGood: '#66ddaa', notifBad: '#ff5577', op: '#cc88ff',
+  },
+  {
+    name: 'Mocha',
+    bg: '#1a120a', cell: '#2a1c10', cellText: '#f5e6d0', frame: '#a07050',
+    frameGlow: '#d4a86a', accent: '#7a5230', highlight: '#ffcc88',
+    text: '#f0d8b0', notifGood: '#9ed070', notifBad: '#dd5544', op: '#e8b878',
+  },
+];
+
+let palette = Utils.pick(PALETTES);
+
+// ============================================================
+// AUDIO ENGINE — same architecture as Verge
+// ============================================================
+const AudioEngine = {
+  ctx: null,
+  masterGain: null,
+  musicGain: null,
+  sfxGain: null,
+  musicPlaying: false,
+  musicScheduler: null,
+  musicNextNoteTime: 0,
+  musicBeat: 0,
+  musicBPM: 110,
+  // Persistent volume settings (so toggles can restore)
+  _musicVolume: 0.60,
+  _sfxVolume: 0.65,
+  musicEnabled: true,
+  sfxEnabled: true,
+
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.9;
+    this.masterGain.connect(this.ctx.destination);
+
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = this.sfxEnabled ? this._sfxVolume : 0;
+    this.sfxGain.connect(this.masterGain);
+
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = this.musicEnabled ? this._musicVolume : 0;
+    this.musicGain.connect(this.masterGain);
+  },
+
+  setMusicEnabled(on) {
+    this.musicEnabled = on;
+    if (this.musicGain) {
+      this.musicGain.gain.value = on ? this._musicVolume : 0;
+    }
+  },
+
+  setSfxEnabled(on) {
+    this.sfxEnabled = on;
+    if (this.sfxGain) {
+      this.sfxGain.gain.value = on ? this._sfxVolume : 0;
+    }
+  },
+
+  toggleMusic() { this.setMusicEnabled(!this.musicEnabled); },
+  toggleSfx() { this.setSfxEnabled(!this.sfxEnabled); },
+
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  },
+
+  _tone(freq, type, duration, dest, startTime) {
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const now = this.ctx.currentTime;
+    const t = Math.max(startTime || now, now + 0.001);
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(g);
+    g.connect(dest || this.sfxGain);
+    osc.start(t);
+    osc.stop(t + duration);
+  },
+
+  playCorrectClick() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'sine', 0.12, null, t);
+    this._tone(659, 'sine', 0.12, null, t + 0.07);
+    this._tone(784, 'sine', 0.18, null, t + 0.14);
+  },
+
+  playCorrectIgnore() {
+    if (!this.ctx) return;
+    this._tone(440, 'sine', 0.15);
+  },
+
+  playMistake() {
+    if (!this.ctx) return;
+    this._tone(180, 'sawtooth', 0.25);
+  },
+
+  playLevelUp() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'sine', 0.1, null, t);
+    this._tone(659, 'sine', 0.1, null, t + 0.08);
+    this._tone(784, 'sine', 0.1, null, t + 0.16);
+    this._tone(1047, 'sine', 0.2, null, t + 0.24);
+  },
+
+  playLevelDown() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'triangle', 0.18, null, t);
+    this._tone(392, 'triangle', 0.28, null, t + 0.13);
+  },
+
+  playSwap() {
+    if (!this.ctx) return;
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    // Quick noise whoosh
+    const t = this.ctx.currentTime;
+    const bufSize = this.ctx.sampleRate * 0.15;
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.frequency.value = 1500;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.15;
+    src.connect(flt);
+    flt.connect(g);
+    g.connect(this.sfxGain);
+    src.start(t);
+    src.stop(t + 0.15);
+  },
+
+  playGameOver() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const notes = [784, 740, 698, 659, 622, 587, 554, 523, 494, 440, 392, 349];
+    notes.forEach((f, i) => this._tone(f, 'triangle', 0.12, null, t + i * 0.08));
+  },
+
+  // --- MUSIC ---
+  startMusic() {
+    if (!this.ctx || this.musicPlaying) return;
+    this.musicPlaying = true;
+    this.musicBeat = 0;
+    this._chordIndex = 0;
+    this._chordProgression = [
+      { bass: 55.00, notes: [220, 261.63, 329.63] },
+      { bass: 43.65, notes: [174.61, 220, 261.63] },
+      { bass: 65.41, notes: [261.63, 329.63, 392] },
+      { bass: 49.00, notes: [196, 246.94, 293.66] },
+    ];
+    const begin = () => {
+      this.musicNextNoteTime = this.ctx.currentTime + 0.1;
+      this.musicScheduler = setInterval(() => this._scheduleMusicNotes(), 25);
+    };
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().then(begin);
+    } else {
+      begin();
+    }
+  },
+
+  stopMusic() {
+    this.musicPlaying = false;
+    if (this.musicScheduler) {
+      clearInterval(this.musicScheduler);
+      this.musicScheduler = null;
+    }
+  },
+
+  _scheduleMusicNotes() {
+    if (!this.musicPlaying || !this.ctx) return;
+    // Defensive: if the context drifted back to suspended, kick it.
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+      return; // wait one tick for currentTime to advance
+    }
+    const beatDur = 60 / this.musicBPM;
+    const lookAhead = 0.12;
+    if (this.musicNextNoteTime < this.ctx.currentTime - 0.05) {
+      this.musicNextNoteTime = this.ctx.currentTime + 0.1;
+    }
+    while (this.musicNextNoteTime < this.ctx.currentTime + lookAhead) {
+      this._playMusicBeat(this.musicNextNoteTime, this.musicBeat, beatDur);
+      this.musicNextNoteTime += beatDur / 2;
+      this.musicBeat++;
+    }
+  },
+
+  _playMusicBeat(time, beat, beatDur) {
+    const halfBeat = beatDur / 2;
+    if (beat > 0 && beat % 8 === 0) {
+      this._chordIndex = (this._chordIndex + 1) % this._chordProgression.length;
+    }
+    const chord = this._chordProgression[this._chordIndex];
+
+    if (beat % 2 === 0) {
+      this._musicNote(chord.bass, 'sawtooth', halfBeat * 1.8, 0.22, time, 240);
+    }
+    const arpNote = chord.notes[beat % chord.notes.length];
+    this._musicNote(arpNote, 'square', halfBeat * 0.7, 0.08, time, 1800);
+
+    if (beat % 16 === 0) {
+      chord.notes.forEach((n, i) => {
+        this._musicNote(n * 0.5, 'sine', beatDur * 4, 0.06, time + i * 0.01, 900);
+      });
+    }
+    if (beat % 2 === 1) this._musicNoise(0.018, 0.07, time);
+    if (beat % 4 === 0) this._musicKick(time);
+  },
+
+  _musicNote(freq, type, dur, vol, time, filterFreq) {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    const flt = this.ctx.createBiquadFilter();
+    osc.type = type;
+    osc.frequency.value = freq;
+    flt.type = 'lowpass';
+    flt.frequency.value = filterFreq || 2000;
+    flt.Q.value = 1;
+    g.gain.setValueAtTime(vol, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    osc.connect(flt);
+    flt.connect(g);
+    g.connect(this.musicGain);
+    osc.start(time);
+    osc.stop(time + dur + 0.05);
+  },
+
+  _musicNoise(dur, vol, time) {
+    const bufSize = this.ctx.sampleRate * dur;
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'highpass';
+    flt.frequency.value = 7000;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    src.connect(flt);
+    flt.connect(g);
+    g.connect(this.musicGain);
+    src.start(time);
+    src.stop(time + dur + 0.01);
+  },
+
+  _musicKick(time) {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, time);
+    osc.frequency.exponentialRampToValueAtTime(40, time + 0.05);
+    g.gain.setValueAtTime(0.30, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+    osc.connect(g);
+    g.connect(this.musicGain);
+    osc.start(time);
+    osc.stop(time + 0.14);
+  },
+};
+
+// ============================================================
+// EXERCISE — a single arithmetic problem
+// ============================================================
+class Exercise {
+  constructor() {
+    this.regenerate();
+  }
+
+  regenerate(forcedOp) {
+    this.op = forcedOp || (Utils.chance(CONFIG.operationMix) ? '+' : '-');
+    if (this.op === '+') {
+      this.a = Utils.randInt(CONFIG.minOperand, CONFIG.maxOperand);
+      this.b = Utils.randInt(CONFIG.minOperand, CONFIG.maxOperand);
+      this.result = this.a + this.b;
+    } else {
+      this.a = Utils.randInt(CONFIG.minOperand, CONFIG.maxOperand);
+      this.b = Utils.randInt(CONFIG.minOperand, this.a);
+      this.result = this.a - this.b;
+    }
+  }
+
+  // Construct an exercise (with the existing op) that produces a specific result.
+  // Used by post-max difficulty tightening to cluster results within a narrow band.
+  setResult(target) {
+    if (this.op === '+') {
+      // a + b = target, both in 100-999, so target in 200..1998
+      target = Utils.clamp(target, 200, 1998);
+      const minA = Math.max(CONFIG.minOperand, target - CONFIG.maxOperand);
+      const maxA = Math.min(CONFIG.maxOperand, target - CONFIG.minOperand);
+      this.a = Utils.randInt(minA, maxA);
+      this.b = target - this.a;
+    } else {
+      // a - b = target, b ≤ a, both in 100-999, so target in 0..899
+      target = Utils.clamp(target, 0, 899);
+      const minA = Math.max(CONFIG.minOperand, target + CONFIG.minOperand);
+      const maxA = CONFIG.maxOperand;
+      this.a = Utils.randInt(minA, maxA);
+      this.b = this.a - target;
+    }
+    this.result = this.op === '+' ? this.a + this.b : this.a - this.b;
+  }
+}
+
+// ============================================================
+// CELL — a positioned exercise on the grid
+// ============================================================
+class Cell {
+  constructor(row, col) {
+    this.row = row;
+    this.col = col;
+    this.exercise = new Exercise();
+    // Position interpolation for swap animation
+    this.fromX = 0;
+    this.fromY = 0;
+    this.toX = 0;
+    this.toY = 0;
+    this.x = 0;
+    this.y = 0;
+  }
+
+  setPosition(x, y) {
+    this.fromX = x;
+    this.fromY = y;
+    this.toX = x;
+    this.toY = y;
+    this.x = x;
+    this.y = y;
+  }
+
+  startSwapTo(x, y) {
+    this.fromX = this.x;
+    this.fromY = this.y;
+    this.toX = x;
+    this.toY = y;
+  }
+
+  updateAnim(t) {
+    // t in [0, 1], eased
+    const e = Utils.easeOutCubic(t);
+    this.x = Utils.lerp(this.fromX, this.toX, e);
+    this.y = Utils.lerp(this.fromY, this.toY, e);
+  }
+}
+
+// ============================================================
+// GRID — manages cells, frames, and pair-validity check
+// ============================================================
+const Grid = {
+  rows: 0,
+  cols: 0,
+  framing: 'grid',
+  cells: [],         // flat array
+  cellW: 0,
+  cellH: 0,
+  gap: 0,
+  originX: 0,
+  originY: 0,
+
+  reset(level) {
+    const def = CONFIG.levels[Math.min(level - 1, CONFIG.levels.length - 1)];
+    this.rows = def.rows;
+    this.cols = def.cols;
+    this.framing = def.framing;
+    this.cells = [];
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        this.cells.push(new Cell(r, c));
+      }
+    }
+    this.enforceRowOperationMix();
+    this.tightenResults();
+    this.maybeForceNoValidPair();
+    this.layout();
+    for (const cell of this.cells) {
+      const pos = this.cellPosition(cell.row, cell.col);
+      cell.setPosition(pos.x, pos.y);
+    }
+  },
+
+  layout() {
+    const w = Renderer.width;
+    const h = Renderer.height;
+    this.cellW = Math.min(w * CONFIG.cellWidthFraction, 220);
+    this.cellH = Math.min(h * CONFIG.cellHeightFraction, 80);
+    // Ensure cells fit
+    const maxW = (w - 80) / this.cols - 16;
+    if (this.cellW > maxW) this.cellW = maxW;
+    this.gap = Math.max(w * CONFIG.cellGapFraction, 14);
+
+    const totalW = this.cols * this.cellW + (this.cols - 1) * this.gap;
+    const totalH = this.rows * this.cellH + (this.rows - 1) * this.gap;
+    this.originX = (w - totalW) / 2;
+    this.originY = (h - totalH) / 2;
+  },
+
+  cellPosition(row, col) {
+    return {
+      x: this.originX + col * (this.cellW + this.gap),
+      y: this.originY + row * (this.cellH + this.gap),
+    };
+  },
+
+  // Re-layout when window resizes
+  relayout() {
+    this.layout();
+    for (const cell of this.cells) {
+      const pos = this.cellPosition(cell.row, cell.col);
+      cell.setPosition(pos.x, pos.y);
+    }
+  },
+
+  // Returns true if at least one valid pair exists
+  hasValidPair() {
+    // Group cells by frame
+    const frames = this._getFrames();
+    for (const frameCells of frames) {
+      // Check all pairs in this frame
+      for (let i = 0; i < frameCells.length; i++) {
+        for (let j = i + 1; j < frameCells.length; j++) {
+          const a = frameCells[i];
+          const b = frameCells[j];
+          if (a.exercise.op !== b.exercise.op) continue;
+          // Determine which is higher (smaller row index)
+          let higher, lower;
+          if (a.row < b.row) { higher = a; lower = b; }
+          else if (b.row < a.row) { higher = b; lower = a; }
+          else continue; // same row — not a vertical pair
+          if (higher.exercise.result > lower.exercise.result) return true;
+        }
+      }
+    }
+    return false;
+  },
+
+  _getFrames() {
+    if (this.framing === 'columns') {
+      const frames = [];
+      for (let c = 0; c < this.cols; c++) {
+        frames.push(this.cells.filter(cell => cell.col === c));
+      }
+      return frames;
+    }
+    // 'grid' — single frame containing all cells
+    return [this.cells];
+  },
+
+  // Compute frame bounding boxes for rendering
+  getFrameBounds() {
+    if (this.framing === 'columns') {
+      const bounds = [];
+      for (let c = 0; c < this.cols; c++) {
+        const colCells = this.cells.filter(cell => cell.col === c);
+        if (colCells.length === 0) continue;
+        const xs = colCells.map(cl => this.cellPosition(cl.row, cl.col).x);
+        const ys = colCells.map(cl => this.cellPosition(cl.row, cl.col).y);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs) + this.cellW;
+        const maxY = Math.max(...ys) + this.cellH;
+        bounds.push({
+          x: minX - CONFIG.framePadding,
+          y: minY - CONFIG.framePadding,
+          w: (maxX - minX) + CONFIG.framePadding * 2,
+          h: (maxY - minY) + CONFIG.framePadding * 2,
+        });
+      }
+      return bounds;
+    }
+    // grid framing
+    const minX = this.originX;
+    const minY = this.originY;
+    const maxX = this.originX + this.cols * this.cellW + (this.cols - 1) * this.gap;
+    const maxY = this.originY + this.rows * this.cellH + (this.rows - 1) * this.gap;
+    return [{
+      x: minX - CONFIG.framePadding,
+      y: minY - CONFIG.framePadding,
+      w: (maxX - minX) + CONFIG.framePadding * 2,
+      h: (maxY - minY) + CONFIG.framePadding * 2,
+    }];
+  },
+
+  // Permute cell positions randomly. After this, each cell has a new (row, col).
+  shufflePositions() {
+    const positions = [];
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        positions.push({ row: r, col: c });
+      }
+    }
+    const shuffled = Utils.shuffle(positions);
+    this.cells.forEach((cell, i) => {
+      cell.row = shuffled[i].row;
+      cell.col = shuffled[i].col;
+      const pos = this.cellPosition(cell.row, cell.col);
+      cell.startSwapTo(pos.x, pos.y);
+    });
+  },
+
+  // After swap arrives, possibly regenerate values
+  applyRegeneration() {
+    for (const cell of this.cells) {
+      if (Utils.chance(CONFIG.regenerationChance)) {
+        cell.exercise.regenerate();
+      }
+    }
+    this.enforceRowOperationMix();
+    this.tightenResults();
+    this.maybeForceNoValidPair();
+  },
+
+  // Each row must contain at least one '+' and one '-' exercise.
+  // Fixes any row that's missing one by force-regenerating a single cell.
+  enforceRowOperationMix() {
+    for (let r = 0; r < this.rows; r++) {
+      const rowCells = this.cells.filter(c => c.row === r);
+      if (rowCells.length < 2) continue;
+      const plus = rowCells.filter(c => c.exercise.op === '+');
+      const minus = rowCells.filter(c => c.exercise.op === '-');
+      if (plus.length === 0) {
+        Utils.pick(minus).exercise.regenerate('+');
+      } else if (minus.length === 0) {
+        Utils.pick(plus).exercise.regenerate('-');
+      }
+    }
+  },
+
+  // With probability forceIgnoreProbability, rearrange results so no valid pair
+  // exists (every same-op cell in an upper row has a result strictly less than
+  // every same-op cell in a lower row). Called after tightening so it respects
+  // the post-max spread band when applicable.
+  maybeForceNoValidPair() {
+    if (!Utils.chance(CONFIG.forceIgnoreProbability)) return;
+
+    const spread = LevelManager.getResultSpread(); // null at low levels
+    const frames = this._getFrames();
+    for (const frameCells of frames) {
+      for (const op of ['+', '-']) {
+        const cellsOfOp = frameCells.filter(c => c.exercise.op === op);
+        if (cellsOfOp.length < 2) continue;
+
+        const rowSet = new Set(cellsOfOp.map(c => c.row));
+        const rowsSorted = Array.from(rowSet).sort((a, b) => a - b);
+        if (rowsSorted.length < 2) continue; // all in one row — no pair possible
+
+        const [rangeMin, rangeMax] = op === '+' ? [200, 1998] : [0, 899];
+
+        // Decide the band: post-max uses the current cluster spread; otherwise
+        // pick a random medium-sized band so results aren't pathologically wide.
+        let bandMin, bandMax;
+        if (spread !== null) {
+          const half = Math.floor(spread / 2);
+          const center = Utils.randInt(rangeMin + half, rangeMax - half);
+          bandMin = center - half;
+          bandMax = center + half;
+        } else {
+          const size = Utils.randInt(400, 900);
+          const half = Math.floor(size / 2);
+          const center = Utils.randInt(rangeMin + half, rangeMax - half);
+          bandMin = center - half;
+          bandMax = center + half;
+        }
+
+        const numRows = rowsSorted.length;
+        const bandSize = bandMax - bandMin;
+        // Step between rows: enough to guarantee minPairDifference + some variety
+        const step = Math.max(CONFIG.minPairDifference + 5, Math.floor(bandSize / numRows));
+        const total = step * (numRows - 1);
+        if (total > bandSize) continue;
+
+        const base = Utils.randInt(bandMin, bandMax - total);
+        // Within a row, results can vary within [0, step - minPairDifference - 1]
+        // without risking crossing into the next row's range.
+        const withinRowSlack = Math.max(0, step - CONFIG.minPairDifference - 1);
+
+        for (let i = 0; i < numRows; i++) {
+          const row = rowsSorted[i];
+          const rowMin = base + i * step;
+          const rowMax = rowMin + withinRowSlack;
+          for (const cell of cellsOfOp) {
+            if (cell.row === row) {
+              cell.exercise.setResult(Utils.randInt(rowMin, rowMax));
+            }
+          }
+        }
+      }
+    }
+  },
+
+  // Post-max-level difficulty: cluster same-op results within each frame to a
+  // narrow band. Pairs must still differ by at least minPairDifference (default 20).
+  // No-op below the post-max threshold.
+  tightenResults() {
+    const spread = LevelManager.getResultSpread();
+    if (spread === null) return;
+    const frames = this._getFrames();
+    for (const frameCells of frames) {
+      for (const op of ['+', '-']) {
+        const same = frameCells.filter(c => c.exercise.op === op);
+        if (same.length < 2) continue;
+
+        // Pick a center result inside the valid result range for this op
+        let center;
+        if (op === '+') {
+          center = Utils.randInt(400 + Math.floor(spread / 2), 1700 - Math.floor(spread / 2));
+        } else {
+          center = Utils.randInt(Math.floor(spread / 2) + 50, 800 - Math.floor(spread / 2));
+        }
+        const minR = Math.max(0, center - Math.floor(spread / 2));
+        const maxR = center + Math.floor(spread / 2);
+
+        // Snap each cell's result into [minR, maxR]
+        for (const cell of same) {
+          cell.exercise.setResult(Utils.randInt(minR, maxR));
+        }
+
+        // Iteratively enforce min-pair-difference; bail out after a few attempts
+        for (let attempt = 0; attempt < 30; attempt++) {
+          const sorted = same.slice().sort((a, b) => a.exercise.result - b.exercise.result);
+          let conflict = -1;
+          for (let i = 1; i < sorted.length; i++) {
+            if (sorted[i].exercise.result - sorted[i - 1].exercise.result < CONFIG.minPairDifference) {
+              conflict = i;
+              break;
+            }
+          }
+          if (conflict === -1) break;
+          sorted[conflict].exercise.setResult(Utils.randInt(minR, maxR));
+        }
+      }
+    }
+  },
+};
+
+// ============================================================
+// LEVEL MANAGER
+// ============================================================
+const LevelManager = {
+  currentLevel: 1,
+  highestLevelReached: 1,
+  levelsVisitedFirstTime: new Set(),
+
+  reset() {
+    this.currentLevel = 1;
+    this.highestLevelReached = 1;
+    this.levelsVisitedFirstTime = new Set();
+    this.levelsVisitedFirstTime.add(1);
+  },
+
+  // Returns true if this advancement is to a previously-unseen level
+  advance() {
+    const next = this.currentLevel + 1;
+    const isFirstTime = !this.levelsVisitedFirstTime.has(next);
+    this.currentLevel = next;
+    if (next > this.highestLevelReached) this.highestLevelReached = next;
+    this.levelsVisitedFirstTime.add(next);
+    return isFirstTime;
+  },
+
+  demote() {
+    if (this.currentLevel > 1) this.currentLevel--;
+    return this.currentLevel;
+  },
+
+  getRoundDuration() {
+    let dur = CONFIG.roundDuration;
+    if (this.currentLevel > CONFIG.levels.length) {
+      const reduction = (this.currentLevel - CONFIG.levels.length) * CONFIG.postLevel7DurationReduction;
+      dur = Math.max(CONFIG.minRoundDuration, dur - reduction);
+    }
+    return dur;
+  },
+
+  getMistakeBudget() {
+    return CONFIG.baseMistakeBudget + this.highestLevelReached * CONFIG.mistakeBudgetPerLevel;
+  },
+
+  // Returns the maximum allowed result spread within a frame for the current level,
+  // or null if no spread constraint applies (low levels use full random range).
+  getResultSpread() {
+    if (this.currentLevel <= CONFIG.levels.length) return null;
+    const reduction = (this.currentLevel - CONFIG.levels.length) * CONFIG.spreadReductionPerLevel;
+    return Math.max(CONFIG.minResultSpread, CONFIG.baseResultSpread - reduction);
+  },
+};
+
+// ============================================================
+// SCORE MANAGER
+// ============================================================
+const ScoreManager = {
+  trueScore: 0,
+  realMistakes: 0,
+  correctClicks: 0,
+  correctIgnores: 0,
+  wrongClicks: 0,
+  missed: 0,
+  advancementPoints: 0,
+  localMistakes: 0,
+
+  reset() {
+    this.trueScore = 0;
+    this.realMistakes = 0;
+    this.correctClicks = 0;
+    this.correctIgnores = 0;
+    this.wrongClicks = 0;
+    this.missed = 0;
+    this.advancementPoints = 0;
+    this.localMistakes = 0;
+  },
+
+  pointsForLevel(level) {
+    return CONFIG.basePoints + (level - 1) * CONFIG.pointsPerLevel;
+  },
+
+  recordCorrectClick(level) {
+    this.correctClicks++;
+    const pts = this.pointsForLevel(level);
+    this.trueScore += pts;
+    this.advancementPoints += CONFIG.correctClickAdvancement;
+    return pts;
+  },
+
+  recordCorrectIgnore(level) {
+    this.correctIgnores++;
+    const pts = Math.round(this.pointsForLevel(level) * CONFIG.ignorePointsFraction);
+    this.trueScore += pts;
+    this.advancementPoints += CONFIG.correctIgnoreAdvancement;
+    return pts;
+  },
+
+  recordWrongClick() {
+    this.wrongClicks++;
+    this.realMistakes++;
+    this.localMistakes++;
+  },
+
+  recordMissed() {
+    this.missed++;
+    this.realMistakes++;
+    this.localMistakes++;
+  },
+
+  resetLocal() {
+    this.advancementPoints = 0;
+    this.localMistakes = 0;
+  },
+
+  shouldAdvance() {
+    return this.advancementPoints >= CONFIG.pointsToAdvance;
+  },
+
+  shouldDemote() {
+    return this.localMistakes >= CONFIG.mistakesToDemote;
+  },
+
+  isGameOver() {
+    return this.realMistakes >= LevelManager.getMistakeBudget();
+  },
+
+  getEndStats() {
+    return {
+      trueScore: this.trueScore,
+      correctClicks: this.correctClicks,
+      correctIgnores: this.correctIgnores,
+      wrongClicks: this.wrongClicks,
+      missed: this.missed,
+      realMistakes: this.realMistakes,
+      highestLevel: LevelManager.highestLevelReached,
+    };
+  },
+};
+
+// ============================================================
+// VFX
+// ============================================================
+const VFX = {
+  tiltActive: false,
+  tiltTimer: 0,
+  tiltAngle: 0,
+  smileyActive: false,
+  smileyTimer: 0,
+  smileyOpacity: 0,
+  notifications: [],
+  container: null,
+
+  init(container) { this.container = container; },
+
+  reset() {
+    this.tiltActive = false;
+    this.tiltTimer = 0;
+    this.tiltAngle = 0;
+    this.smileyActive = false;
+    this.smileyTimer = 0;
+    this.smileyOpacity = 0;
+    this.notifications = [];
+    if (this.container) this.container.style.transform = '';
+  },
+
+  triggerMistakeFeedback() {
+    this.tiltActive = true;
+    this.tiltAngle = Utils.randFromRange(CONFIG.tiltAngle) * Utils.pick([1, -1]);
+    this.tiltTimer = CONFIG.mistakeFeedbackDuration;
+    if (this.container) {
+      this.container.style.transform = `rotate(${this.tiltAngle}deg)`;
+    }
+    this.smileyActive = true;
+    this.smileyTimer = CONFIG.mistakeFeedbackDuration;
+    this.smileyOpacity = 1;
+  },
+
+  addNotification(text, x, y, color) {
+    this.notifications.push({
+      text, x, y, color,
+      timer: CONFIG.notificationDuration,
+      opacity: 1,
+    });
+  },
+
+  update(dt) {
+    if (this.tiltActive) {
+      this.tiltTimer -= dt;
+      if (this.tiltTimer <= 0) {
+        this.tiltActive = false;
+        this.tiltAngle = 0;
+        if (this.container) this.container.style.transform = '';
+      } else {
+        const progress = 1 - (this.tiltTimer / CONFIG.mistakeFeedbackDuration);
+        const currentAngle = this.tiltAngle * (1 - progress);
+        if (this.container) {
+          this.container.style.transform = `rotate(${currentAngle}deg)`;
+        }
+      }
+    }
+
+    if (this.smileyActive) {
+      this.smileyTimer -= dt;
+      this.smileyOpacity = Math.max(0, this.smileyTimer / CONFIG.mistakeFeedbackDuration);
+      if (this.smileyTimer <= 0) {
+        this.smileyActive = false;
+        this.smileyOpacity = 0;
+      }
+    }
+
+    for (const n of this.notifications) {
+      n.timer -= dt;
+      n.y -= CONFIG.notificationFloatSpeed * dt;
+      n.opacity = Math.max(0, n.timer / CONFIG.notificationDuration);
+    }
+    this.notifications = this.notifications.filter(n => n.timer > 0);
+  },
+};
+
+// ============================================================
+// RENDERER
+// ============================================================
+const Renderer = {
+  canvas: null,
+  ctx: null,
+  width: 0,
+  height: 0,
+  scale: 1,
+
+  init(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.resize();
+  },
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
+    this.canvas.width = this.width * dpr;
+    this.canvas.height = this.height * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.scale = Math.min(this.width, this.height) / 800;
+  },
+
+  getCenterX() { return this.width / 2; },
+  getCenterY() { return this.height / 2; },
+
+  clear() {
+    this.ctx.fillStyle = palette.bg;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  },
+
+  drawFrames(bounds) {
+    const ctx = this.ctx;
+    for (const b of bounds) {
+      // Glow border
+      ctx.strokeStyle = palette.frame;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = palette.frameGlow;
+      ctx.shadowBlur = 12;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.shadowBlur = 0;
+    }
+  },
+
+  drawCell(cell, hideContent) {
+    const ctx = this.ctx;
+    const w = Grid.cellW;
+    const h = Grid.cellH;
+
+    // Background
+    ctx.fillStyle = palette.cell;
+    ctx.fillRect(cell.x, cell.y, w, h);
+
+    // Border
+    ctx.strokeStyle = palette.accent + '88';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(cell.x, cell.y, w, h);
+
+    if (hideContent) return;
+
+    // Exercise text — show as "237 + 451"
+    const fontSize = Math.round(Math.min(h * 0.40, 28));
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const ex = cell.exercise;
+    const cx = cell.x + w / 2;
+    const cy = cell.y + h / 2;
+
+    // Render with colored operator
+    const numA = `${ex.a}`;
+    const numB = `${ex.b}`;
+    const opChar = ex.op === '+' ? '+' : '−';
+    const space = ' ';
+    const fullText = `${numA} ${opChar} ${numB}`;
+    const totalW = ctx.measureText(fullText).width;
+    const startX = cx - totalW / 2;
+
+    // Draw left number
+    ctx.textAlign = 'left';
+    ctx.fillStyle = palette.cellText;
+    ctx.fillText(numA, startX, cy);
+    const aW = ctx.measureText(numA).width;
+    const sW = ctx.measureText(space).width;
+
+    // Draw operator (colored)
+    ctx.fillStyle = palette.op;
+    ctx.fillText(opChar, startX + aW + sW, cy);
+    const opW = ctx.measureText(opChar).width;
+
+    // Draw right number
+    ctx.fillStyle = palette.cellText;
+    ctx.fillText(numB, startX + aW + sW + opW + sW, cy);
+  },
+
+  drawSmiley(cx, cy, opacity) {
+    if (opacity <= 0) return;
+    const ctx = this.ctx;
+    const s = CONFIG.smileySize * this.scale;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = '#ff2244';
+    ctx.beginPath();
+    ctx.arc(cx, cy, s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - s * 0.3, cy - s * 0.2, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + s * 0.3, cy - s * 0.2, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy + s * 0.35, s * 0.35, Math.PI * 1.2, Math.PI * 1.8);
+    ctx.stroke();
+    ctx.restore();
+  },
+
+  drawNotifications() {
+    const ctx = this.ctx;
+    for (const n of VFX.notifications) {
+      ctx.save();
+      ctx.globalAlpha = n.opacity;
+      ctx.font = `bold ${Math.round(28 * this.scale)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = n.color;
+      ctx.fillText(n.text, n.x, n.y);
+      ctx.restore();
+    }
+  },
+
+  drawHUD() {
+    const ctx = this.ctx;
+    ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = palette.text + 'cc';
+    ctx.fillText(`LEVEL ${LevelManager.currentLevel}`, 20, 20);
+
+    // Mistake budget dots
+    const budget = LevelManager.getMistakeBudget();
+    const dotSize = 5 * this.scale;
+    for (let i = 0; i < budget; i++) {
+      ctx.beginPath();
+      ctx.arc(22 + i * (dotSize * 3), 50, dotSize, 0, Math.PI * 2);
+      ctx.fillStyle = i < ScoreManager.realMistakes ? palette.notifBad + 'aa' : palette.accent + '55';
+      ctx.fill();
+    }
+
+    // Round timer bar (top-right)
+    if (Game.phase === 'COUNTDOWN') {
+      const barW = 200 * this.scale;
+      const barH = 8 * this.scale;
+      const barX = this.width - barW - 20;
+      const barY = 24;
+      const totalDur = LevelManager.getRoundDuration();
+      const t = Math.max(0, Game.countdownTimer / totalDur);
+      ctx.fillStyle = palette.accent + '44';
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.fillStyle = palette.highlight;
+      ctx.fillRect(barX, barY, barW * t, barH);
+    }
+
+    // Local progress: advancement points and mistakes
+    const right = this.width - 20;
+    ctx.font = `${Math.round(13 * this.scale)}px monospace`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = palette.text + '99';
+    const advText = `Progress: ${ScoreManager.advancementPoints.toFixed(1)} / ${CONFIG.pointsToAdvance}`;
+    const misText = `Mistakes: ${ScoreManager.localMistakes} / ${CONFIG.mistakesToDemote}`;
+    ctx.fillText(advText, right, 50);
+    ctx.fillText(misText, right, 70);
+  },
+
+  drawMenuScreen() {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+
+    this.clear();
+
+    ctx.font = `bold ${Math.round(56 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('STACK', cx, cy - 220 * this.scale);
+
+    ctx.font = `${Math.round(18 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'bb';
+    ctx.fillText('Mental arithmetic under pressure', cx, cy - 175 * this.scale);
+
+    const lines = [
+      'Each round shows several 3-digit + and − exercises.',
+      'Click if any pair (same operation, same frame)',
+      'has a higher row whose result is greater than a lower row\'s.',
+      'Otherwise, do nothing.',
+      '',
+      'Compute mentally. The clock is short. The grid moves.',
+    ];
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + '88';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, cx, cy + (-50 + i * 22) * this.scale);
+    });
+
+    ctx.font = `bold ${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'cc';
+    ctx.fillText('CHOOSE DIFFICULTY', cx, cy + 130 * this.scale);
+  },
+
+  drawMenuButtons(buttons, hovered) {
+    const ctx = this.ctx;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < buttons.length; i++) {
+      const b = buttons[i];
+      const isHover = i === hovered;
+      ctx.fillStyle = isHover ? palette.highlight + '33' : palette.accent + '22';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = isHover ? palette.highlight : palette.accent;
+      ctx.lineWidth = isHover ? 2.5 : 1.5;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+      ctx.fillStyle = isHover ? palette.highlight : palette.text;
+      ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2);
+      ctx.font = `${Math.round(11 * this.scale)}px monospace`;
+      ctx.fillStyle = palette.text + '77';
+      ctx.fillText(b.sub, b.x + b.w / 2, b.y + b.h + 12 * this.scale);
+    }
+  },
+
+  drawGameOverScreen(stats) {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+    this.clear();
+
+    ctx.font = `bold ${Math.round(40 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('GAME OVER', cx, cy - 130 * this.scale);
+
+    ctx.font = `bold ${Math.round(28 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.notifGood;
+    ctx.fillText(`SCORE: ${stats.trueScore}`, cx, cy - 75 * this.scale);
+
+    const statLines = [
+      `Correct Clicks: ${stats.correctClicks}`,
+      `Correct Ignores: ${stats.correctIgnores}`,
+      `Wrong Clicks: ${stats.wrongClicks}`,
+      `Missed: ${stats.missed}`,
+      `Highest Level: ${stats.highestLevel}`,
+      `Total Mistakes: ${stats.realMistakes}`,
+    ];
+    ctx.font = `${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'cc';
+    statLines.forEach((line, i) => {
+      ctx.fillText(line, cx, cy + (-25 + i * 28) * this.scale);
+    });
+
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + '66';
+    ctx.fillText('Click anywhere to play again', cx, cy + 165 * this.scale);
+  },
+
+  drawPauseOverlay() {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    ctx.font = `bold ${Math.round(56 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('PAUSED', this.getCenterX(), this.getCenterY());
+
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'aa';
+    ctx.fillText('Click PLAY in the toolbar to resume', this.getCenterX(), this.getCenterY() + 50 * this.scale);
+    ctx.restore();
+  },
+
+  drawInstructionsOverlay(game) {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+    const s = this.scale;
+
+    // Dim background
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    // Panel
+    const panelW = Math.min(this.width - 80, 560);
+    const panelH = Math.min(this.height - 120, 460);
+    const panelX = cx - panelW / 2;
+    const panelY = cy - panelH / 2;
+    ctx.fillStyle = palette.cell;
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = palette.frame;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+    // Title
+    ctx.font = `bold ${Math.round(28 * s)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('HOW TO PLAY', cx, panelY + 24);
+
+    // Instructions
+    const lines = [
+      'Each round shows several 3-digit + and − exercises',
+      'arranged in a grid with one or more colored frames.',
+      '',
+      'CLICK if you find a pair where:',
+      '  • both use the same operation (+ or −)',
+      '  • both are inside the same frame',
+      '  • the higher row\'s result is greater than',
+      '    the lower row\'s result',
+      '',
+      'IGNORE (do nothing) if no such pair exists.',
+      '',
+      'You have 8 seconds. Then everything reshuffles.',
+      'Compute mentally. Be patient when there\'s nothing.',
+    ];
+    ctx.font = `${Math.round(13 * s)}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = palette.text + 'dd';
+    const textX = panelX + 30;
+    const lineH = 19 * s;
+    let lineY = panelY + 70;
+    for (const line of lines) {
+      ctx.fillText(line, textX, lineY);
+      lineY += lineH;
+    }
+
+    // Close button
+    const btnW = 100 * s;
+    const btnH = 32 * s;
+    const btnX = cx - btnW / 2;
+    const btnY = panelY + panelH - btnH - 18;
+    ctx.fillStyle = palette.accent + '55';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    ctx.strokeStyle = palette.highlight;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(btnX, btnY, btnW, btnH);
+    ctx.font = `bold ${Math.round(14 * s)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('CLOSE', cx, btnY + btnH / 2);
+
+    // Stash bounds for hit testing
+    game.instructionsCloseBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+    ctx.restore();
+  },
+};
+
+// ============================================================
+// TOOLBAR — top-of-screen button row
+// ============================================================
+// Buttons are state-aware: pause/restart only act during PLAYING,
+// instructions/music/sfx work in any state.
+const Toolbar = {
+  buttons: [],   // populated by layout()
+  hovered: -1,
+
+  layout() {
+    const w = CONFIG.toolbarButtonW;
+    const h = CONFIG.toolbarButtonH;
+    const gap = CONFIG.toolbarGap;
+    const top = CONFIG.toolbarTopMargin;
+    const items = [
+      { id: 'pause', label: () => Game.isPaused ? 'PLAY' : 'PAUSE' },
+      { id: 'restart', label: () => 'RESTART' },
+      { id: 'instructions', label: () => 'HELP' },
+      { id: 'music', label: () => AudioEngine.musicEnabled ? 'MUSIC' : 'MUSIC×' },
+      { id: 'sfx', label: () => AudioEngine.sfxEnabled ? 'SFX' : 'SFX×' },
+    ];
+    const totalW = items.length * w + (items.length - 1) * gap;
+    const startX = (Renderer.width - totalW) / 2;
+    this.buttons = items.map((it, i) => ({
+      id: it.id,
+      label: it.label,
+      x: startX + i * (w + gap),
+      y: top,
+      w, h,
+    }));
+  },
+
+  hitTest(x, y) {
+    for (let i = 0; i < this.buttons.length; i++) {
+      const b = this.buttons[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+    }
+    return -1;
+  },
+
+  handleClick(idx) {
+    const b = this.buttons[idx];
+    if (!b) return;
+    switch (b.id) {
+      case 'pause':        Game.togglePause(); break;
+      case 'restart':      Game.restart(); break;
+      case 'instructions': Game.toggleInstructions(); break;
+      case 'music':        AudioEngine.toggleMusic(); break;
+      case 'sfx':          AudioEngine.toggleSfx(); break;
+    }
+  },
+
+  draw(ctx) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(11 * Renderer.scale)}px monospace`;
+    for (let i = 0; i < this.buttons.length; i++) {
+      const b = this.buttons[i];
+      const isHover = i === this.hovered;
+      const isAvailable = this._isAvailable(b.id);
+      // Audio toggles: distinct color when muted
+      const muted = (b.id === 'music' && !AudioEngine.musicEnabled) ||
+                    (b.id === 'sfx' && !AudioEngine.sfxEnabled);
+
+      // Background
+      let bg;
+      if (muted) bg = palette.notifBad + '44';
+      else if (isHover) bg = palette.highlight + '44';
+      else bg = palette.cell + 'cc';
+      ctx.fillStyle = bg;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+
+      // Border
+      let stroke;
+      if (muted) stroke = palette.notifBad;
+      else if (isHover) stroke = palette.highlight;
+      else if (isAvailable) stroke = palette.accent;
+      else stroke = palette.accent + '66';
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = isHover ? 2 : 1.5;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+      // Label
+      let fg;
+      if (muted) fg = palette.notifBad;
+      else if (isHover) fg = palette.highlight;
+      else if (isAvailable) fg = palette.text;
+      else fg = palette.text + '88';
+      ctx.fillStyle = fg;
+      ctx.fillText(b.label(), b.x + b.w / 2, b.y + b.h / 2 + 1);
+    }
+  },
+
+  _isAvailable(id) {
+    if (id === 'pause' || id === 'restart') return Game.state === 'PLAYING';
+    return true;
+  },
+};
+
+// ============================================================
+// GAME
+// ============================================================
+const Game = {
+  state: 'MENU', // MENU | PLAYING | GAME_OVER
+  // Phases inside PLAYING:
+  //  - COUNTDOWN: round is active, player can click
+  //  - FEEDBACK_PAUSE: showing feedback, waiting before swap
+  //  - SWAPPING: animation in progress
+  phase: 'COUNTDOWN',
+  countdownTimer: 0,
+  feedbackTimer: 0,
+  swapTimer: 0,
+  endStats: null,
+  menuButtons: [],
+  hoveredButton: -1,
+  pendingLevelChange: null, // 'advance' | 'demote' | null
+  isPaused: false,
+  showingInstructions: false,
+  lastStartLevel: 1,           // remembered for RESTART
+  instructionsCloseBtn: null,  // computed when overlay drawn
+
+  init() {
+    const canvas = document.getElementById('canvas');
+    const container = document.getElementById('game-container');
+    Renderer.init(canvas);
+    VFX.init(container);
+
+    window.addEventListener('resize', () => {
+      Renderer.resize();
+      if (this.state === 'PLAYING') Grid.relayout();
+    });
+
+    let lastInputTime = 0;
+    const handleInput = (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      if (now - lastInputTime < 100) return;
+      lastInputTime = now;
+      AudioEngine.init();
+      AudioEngine.resume();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      this.onClick(x, y);
+    };
+    canvas.addEventListener('pointerdown', handleInput);
+
+    canvas.addEventListener('pointermove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Toolbar hover (any state)
+      Toolbar.hovered = Toolbar.hitTest(x, y);
+
+      // Menu button hover (only in MENU)
+      if (this.state === 'MENU') {
+        this.hoveredButton = this._buttonAt(x, y);
+      } else {
+        this.hoveredButton = -1;
+      }
+
+      const overSomething = Toolbar.hovered >= 0 || this.hoveredButton >= 0;
+      canvas.style.cursor = overSomething ? 'pointer' : 'default';
+    });
+
+    let last = performance.now();
+    const loop = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+      this.update(dt);
+      this.render();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  },
+
+  _layoutMenuButtons() {
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const s = Renderer.scale;
+    const bw = 140 * s;
+    const bh = 50 * s;
+    const gap = 20 * s;
+    const total = bw * CONFIG.difficulties.length + gap * (CONFIG.difficulties.length - 1);
+    const startX = cx - total / 2;
+    const y = cy + 160 * s;
+    this.menuButtons = CONFIG.difficulties.map((d, i) => ({
+      label: d.label,
+      sub: `Start at level ${d.startLevel}`,
+      startLevel: d.startLevel,
+      x: startX + i * (bw + gap),
+      y: y,
+      w: bw,
+      h: bh,
+    }));
+  },
+
+  _buttonAt(x, y) {
+    for (let i = 0; i < this.menuButtons.length; i++) {
+      const b = this.menuButtons[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+    }
+    return -1;
+  },
+
+  // --- STATE TRANSITIONS ---
+  startGame(startLevel) {
+    this.state = 'PLAYING';
+    this.lastStartLevel = startLevel || 1;
+    palette = Utils.pick(PALETTES);
+    LevelManager.reset();
+    if (startLevel && startLevel > 1) {
+      for (let l = 1; l <= startLevel; l++) {
+        LevelManager.levelsVisitedFirstTime.add(l);
+      }
+      LevelManager.currentLevel = startLevel;
+      LevelManager.highestLevelReached = startLevel;
+    }
+    ScoreManager.reset();
+    VFX.reset();
+    this.pendingLevelChange = null;
+    this.isPaused = false;
+    this.showingInstructions = false;
+    Grid.reset(LevelManager.currentLevel);
+    this._beginCountdown();
+    AudioEngine.startMusic();
+  },
+
+  restart() {
+    if (this.state !== 'PLAYING') return;
+    AudioEngine.stopMusic();
+    this.startGame(this.lastStartLevel);
+  },
+
+  togglePause() {
+    if (this.state !== 'PLAYING') return;
+    this.isPaused = !this.isPaused;
+  },
+
+  toggleInstructions() {
+    this.showingInstructions = !this.showingInstructions;
+  },
+
+  endGame() {
+    this.state = 'GAME_OVER';
+    this.endStats = ScoreManager.getEndStats();
+    AudioEngine.stopMusic();
+    AudioEngine.playGameOver();
+    VFX.reset();
+  },
+
+  returnToMenu() {
+    this.state = 'MENU';
+    palette = Utils.pick(PALETTES);
+  },
+
+  _beginCountdown() {
+    this.phase = 'COUNTDOWN';
+    this.countdownTimer = LevelManager.getRoundDuration();
+  },
+
+  _beginFeedbackPause() {
+    this.phase = 'FEEDBACK_PAUSE';
+    this.feedbackTimer = CONFIG.postClickPause;
+  },
+
+  _beginSwap() {
+    this.phase = 'SWAPPING';
+    this.swapTimer = CONFIG.swapAnimationDuration;
+    Grid.shufflePositions();
+    AudioEngine.playSwap();
+  },
+
+  _onSwapArrived() {
+    Grid.applyRegeneration();
+
+    // Apply pending level change after swap completes (so the new grid reflects new level)
+    if (this.pendingLevelChange === 'advance') {
+      const isFirstTime = LevelManager.advance();
+      if (isFirstTime) ScoreManager.resetLocal();
+      else ScoreManager.advancementPoints = 0; // reset only the wins counter on re-advance
+      Grid.reset(LevelManager.currentLevel);
+    } else if (this.pendingLevelChange === 'demote') {
+      LevelManager.demote();
+      ScoreManager.advancementPoints = 0;
+      ScoreManager.localMistakes = 0; // reset demote counter so we don't immediately re-trigger
+      Grid.reset(LevelManager.currentLevel);
+    }
+    this.pendingLevelChange = null;
+
+    if (ScoreManager.isGameOver()) {
+      this.endGame();
+      return;
+    }
+
+    this._beginCountdown();
+  },
+
+  // --- INPUT ---
+  onClick(x, y) {
+    // Instructions overlay always intercepts clicks first
+    if (this.showingInstructions) {
+      const c = this.instructionsCloseBtn;
+      if (c && x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
+        this.showingInstructions = false;
+      }
+      return;
+    }
+
+    // Toolbar buttons take precedence over game-area clicks
+    const tbIdx = Toolbar.hitTest(x, y);
+    if (tbIdx >= 0) {
+      Toolbar.handleClick(tbIdx);
+      return;
+    }
+
+    if (this.state === 'MENU') {
+      const btn = this._buttonAt(x, y);
+      if (btn >= 0) this.startGame(this.menuButtons[btn].startLevel);
+      return;
+    }
+    if (this.state === 'GAME_OVER') {
+      this.returnToMenu();
+      return;
+    }
+    if (this.state !== 'PLAYING') return;
+    if (this.isPaused) return;
+    if (this.phase !== 'COUNTDOWN') return;
+
+    const hasPair = Grid.hasValidPair();
+    if (hasPair) {
+      this._handleCorrectClick();
+    } else {
+      this._handleWrongClick();
+    }
+  },
+
+  _handleCorrectClick() {
+    const pts = ScoreManager.recordCorrectClick(LevelManager.currentLevel);
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    VFX.addNotification(`+${pts} CORRECT!`, cx, cy, palette.notifGood);
+    AudioEngine.playCorrectClick();
+    this._evaluateLevelChange();
+    this._beginFeedbackPause();
+  },
+
+  _handleCorrectIgnore() {
+    const pts = ScoreManager.recordCorrectIgnore(LevelManager.currentLevel);
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    VFX.addNotification(`+${pts} GOOD`, cx, cy, palette.notifGood);
+    AudioEngine.playCorrectIgnore();
+    this._evaluateLevelChange();
+    this._beginFeedbackPause();
+  },
+
+  _handleWrongClick() {
+    ScoreManager.recordWrongClick();
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    VFX.addNotification('WRONG!', cx, cy, palette.notifBad);
+    VFX.triggerMistakeFeedback();
+    AudioEngine.playMistake();
+    this._evaluateLevelChange();
+    this._beginFeedbackPause();
+  },
+
+  _handleMissed() {
+    ScoreManager.recordMissed();
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    VFX.addNotification('MISSED!', cx, cy, palette.notifBad);
+    VFX.triggerMistakeFeedback();
+    AudioEngine.playMistake();
+    this._evaluateLevelChange();
+    this._beginFeedbackPause();
+  },
+
+  _evaluateLevelChange() {
+    if (ScoreManager.shouldAdvance()) {
+      this.pendingLevelChange = 'advance';
+      AudioEngine.playLevelUp();
+      const cx = Renderer.getCenterX();
+      const cy = Renderer.getCenterY();
+      VFX.addNotification(`LEVEL UP`, cx, cy - 50, palette.highlight);
+    } else if (ScoreManager.shouldDemote()) {
+      this.pendingLevelChange = 'demote';
+      AudioEngine.playLevelDown();
+      const cx = Renderer.getCenterX();
+      const cy = Renderer.getCenterY();
+      VFX.addNotification(`LEVEL DOWN`, cx, cy - 50, palette.notifBad);
+    }
+  },
+
+  // --- UPDATE ---
+  update(dt) {
+    Toolbar.layout();
+
+    if (this.state === 'MENU') {
+      this._layoutMenuButtons();
+      return;
+    }
+
+    if (this.state === 'GAME_OVER') return;
+
+    // Freeze game logic when paused or instructions overlay is open
+    if (this.isPaused || this.showingInstructions) return;
+
+    VFX.update(dt);
+
+    if (this.phase === 'COUNTDOWN') {
+      this.countdownTimer -= dt;
+      if (this.countdownTimer <= 0) {
+        // Time expired without click — was it a "should ignore" or "missed"?
+        const hasPair = Grid.hasValidPair();
+        if (hasPair) {
+          this._handleMissed();
+        } else {
+          this._handleCorrectIgnore();
+        }
+      }
+    } else if (this.phase === 'FEEDBACK_PAUSE') {
+      this.feedbackTimer -= dt;
+      if (this.feedbackTimer <= 0) {
+        this._beginSwap();
+      }
+    } else if (this.phase === 'SWAPPING') {
+      this.swapTimer -= dt;
+      const totalDur = CONFIG.swapAnimationDuration;
+      const t = Utils.clamp(1 - (this.swapTimer / totalDur), 0, 1);
+      for (const cell of Grid.cells) {
+        cell.updateAnim(t);
+      }
+      if (this.swapTimer <= 0) {
+        this._onSwapArrived();
+      }
+    }
+  },
+
+  // --- RENDER ---
+  render() {
+    if (this.state === 'MENU') {
+      Renderer.clear();
+      Renderer.drawMenuScreen();
+      Renderer.drawMenuButtons(this.menuButtons, this.hoveredButton);
+      Toolbar.draw(Renderer.ctx);
+      if (this.showingInstructions) Renderer.drawInstructionsOverlay(this);
+      return;
+    }
+
+    if (this.state === 'GAME_OVER') {
+      Renderer.drawGameOverScreen(this.endStats);
+      Toolbar.draw(Renderer.ctx);
+      if (this.showingInstructions) Renderer.drawInstructionsOverlay(this);
+      return;
+    }
+
+    Renderer.clear();
+
+    if (this.phase !== 'SWAPPING') {
+      Renderer.drawFrames(Grid.getFrameBounds());
+    }
+    for (const cell of Grid.cells) {
+      Renderer.drawCell(cell, this.isPaused);
+    }
+    if (VFX.smileyActive) {
+      Renderer.drawSmiley(Renderer.getCenterX(), Renderer.getCenterY() - 100, VFX.smileyOpacity);
+    }
+    Renderer.drawNotifications();
+    Renderer.drawHUD();
+
+    // Pause overlay (drawn over the gameplay area, under the toolbar)
+    if (this.isPaused) Renderer.drawPauseOverlay();
+
+    Toolbar.draw(Renderer.ctx);
+
+    if (this.showingInstructions) Renderer.drawInstructionsOverlay(this);
+  },
+};
+
+// ============================================================
+// BOOTSTRAP
+// ============================================================
+Game.init();
+</script>
+</body>
+</html>

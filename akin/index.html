@@ -1,0 +1,2168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Akin</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: monospace; }
+  #game-container {
+    width: 100%; height: 100%;
+    transition: transform 0.1s ease-out;
+    transform-origin: center center;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---- Config Panel ---- */
+  #config-panel {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-family: monospace;
+  }
+  #config-panel.visible { display: flex; }
+  .config-modal {
+    background: #15072a;
+    border: 2px solid #b967ff;
+    color: #ffe9a8;
+    padding: 24px;
+    max-width: 720px;
+    width: 92%;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 40px rgba(185, 103, 255, 0.3);
+  }
+  .config-modal h2 {
+    color: #f5a8ff;
+    margin-bottom: 4px;
+    letter-spacing: 2px;
+  }
+  .config-note {
+    color: #b967ff;
+    margin-bottom: 16px;
+    font-size: 12px;
+  }
+  #config-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  #config-body::-webkit-scrollbar { width: 10px; }
+  #config-body::-webkit-scrollbar-track { background: #281548; }
+  #config-body::-webkit-scrollbar-thumb { background: #6040a0; }
+  .config-section { margin-bottom: 18px; }
+  .config-section h3 {
+    color: #f5a8ff;
+    border-bottom: 1px solid #6040a0;
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .config-row {
+    display: flex;
+    align-items: center;
+    padding: 5px 0;
+    font-size: 13px;
+  }
+  .config-row label {
+    flex: 1;
+    margin-right: 12px;
+    color: #ffe9a8;
+  }
+  .config-row input[type="number"] {
+    width: 84px;
+    background: #281548;
+    color: #ffe9a8;
+    border: 1px solid #6040a0;
+    padding: 5px 6px;
+    font-family: monospace;
+    font-size: 13px;
+    outline: none;
+  }
+  .config-row input[type="number"]:focus {
+    border-color: #f5a8ff;
+  }
+  .config-row .dash { padding: 0 6px; color: #b967ff; }
+  .config-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 16px;
+    border-top: 1px solid #6040a0;
+    padding-top: 16px;
+  }
+  .config-footer button {
+    padding: 8px 18px;
+    background: #281548;
+    color: #ffe9a8;
+    border: 1px solid #b967ff;
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+  .config-footer button:hover {
+    background: #6040a0;
+    color: #ffffff;
+  }
+  .config-footer button.primary {
+    background: #6040a0;
+    border-color: #f5a8ff;
+  }
+  .config-footer button.primary:hover {
+    background: #b967ff;
+  }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="canvas"></canvas>
+</div>
+<div id="config-panel">
+  <div class="config-modal">
+    <h2>CONFIGURATION</h2>
+    <p class="config-note">Changes take effect on the next game start (click RESTART after saving).</p>
+    <div id="config-body"></div>
+    <div class="config-footer">
+      <button id="config-copy">COPY</button>
+      <button id="config-cancel">CANCEL</button>
+      <button id="config-save" class="primary">SAVE</button>
+    </div>
+  </div>
+</div>
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const CONFIG = {
+  // Core timing
+  roundDuration: 5,
+  totalGameTime: 120,
+  swapInterval: 10,
+
+  // Shape counts
+  startingShapes: 4,
+  maxShapes: 12,
+
+  // Hidden content
+  hiddenStartLevel: 6,
+  maxHidden: 6,
+  // When a mistake (wrong click OR missed click) involves a pair with at
+  // least one hidden shape, freeze the game for this many seconds and
+  // reveal BOTH shapes in the pair.
+  mistakeHaltDuration: 2.0,
+  blinkHideDuration: 4.0,        // time the shape pulses before content hides
+
+  // Level mechanics
+  directionFlipOnClickLevel: 3,
+  individualRotationLevel: 8,    // per-shape self-spin starts here
+
+  // Individual self-spin (L8+) — each shape spins on its own axis,
+  // flipping direction with a random timer. All shapes still share the
+  // same orbit direction around the big circle.
+  individualRotationTimer: [3, 5],
+  individualFlipProbability: 0.5, // chance to KEEP direction (else flip)
+  selfSpinSpeed: 0.8,              // radians/sec for L8+ self-rotation
+
+  // Scoring
+  // Any correct action — click when you should, or ignore when you shouldn't —
+  // counts toward the streak required to level up.
+  correctActionsToAdvance: 3,
+  consecutiveMistakesToDemote: 3,
+  consecutiveMistakesToGameOver: 6,
+
+  // Rotation
+  baseOrbitSpeed: 0.25,              // slow, fixed; only the direction flips
+
+  // Hidden content peek: every hiddenPeekInterval seconds, pick a random
+  // hidden shape and reveal it for hiddenPeekDuration seconds.
+  hiddenPeekInterval: 2.0,
+  hiddenPeekDuration: 1.0,
+
+  // Rendering
+  circleRadiusFraction: 0.36,
+  shapeSize: 110,
+  shapeMinSize: 62,
+  shapeMaxSize: 140,
+  outerLineWidth: 8,
+  clockHandWidth: 8,
+  clockHandHeadSize: 22,
+
+  // Difficulty
+  difficulties: [
+    { label: 'EASY',   startLevel: 1 },
+    { label: 'MEDIUM', startLevel: 4 },
+    { label: 'HARD',   startLevel: 7 },
+  ],
+
+  // Feedback
+  tiltAngle: [2, 4],
+  mistakeFeedbackDuration: 0.4,
+  notificationDuration: 1.5,
+  notificationFloatSpeed: 50,
+  smileySize: 38,
+
+  // Toolbar
+  toolbarButtonW: 64,
+  toolbarButtonH: 32,
+  toolbarGap: 8,
+  toolbarTopMargin: 12,
+};
+
+// Content characteristics:
+//   Color (4) × Shape (4) × Fill (3) = 48 distinct contents.
+// White/red/blue/green are reserved for content only; the game's UI
+// palette never uses these colors.
+const CONTENT_COLORS = [
+  { name: 'white', hex: '#ffffff' },
+  { name: 'red',   hex: '#ff3344' },
+  { name: 'blue',  hex: '#3366ff' },
+  { name: 'green', hex: '#33cc44' },
+];
+const INNER_SHAPES = ['square', 'circle', 'star', 'triangle'];
+const FILL_TYPES = ['solid', 'dots', 'stripes'];
+
+// ============================================================
+// UTILS
+// ============================================================
+const Utils = {
+  randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; },
+  randFloat(min, max) { return Math.random() * (max - min) + min; },
+  randFromRange(arr) { return this.randFloat(arr[0], arr[1]); },
+  randIntFromRange(arr) { return this.randInt(arr[0], arr[1]); },
+  chance(p) { return Math.random() < p; },
+  clamp(v, min, max) { return Math.max(min, Math.min(max, v)); },
+  lerp(a, b, t) { return a + (b - a) * t; },
+  pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; },
+  pickIndex(n) { return Math.floor(Math.random() * n); },
+  shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  },
+};
+
+// ============================================================
+// PALETTES
+// ============================================================
+// Synthwave UI palette. NONE of these values are white, red, blue, or
+// green — those are reserved for content. Colors are purples, pinks,
+// magentas, oranges, golds, cyans — classic synthwave.
+const PALETTES = [
+  {
+    name: 'Synthwave',
+    bg: '#15072a',              // deep eggplant
+    ring: '#281548',            // dark purple (the big orbit circle)
+    accent: '#b967ff',          // neon purple
+    outline: '#ff6ec7',         // hot pink (inner shape stroke)
+    highlight: '#f5a8ff',       // bright magenta (clock hands, highlights)
+    text: '#ffe9a8',            // pale warm cream (menus, HUD)
+    notifGood: '#ffc020',       // gold
+    notifBad: '#ff6b2e',        // orange
+  },
+];
+
+let palette = Utils.pick(PALETTES);
+
+// ============================================================
+// AUDIO ENGINE (same as Stack)
+// ============================================================
+const AudioEngine = {
+  ctx: null,
+  masterGain: null,
+  musicGain: null,
+  sfxGain: null,
+  musicPlaying: false,
+  musicScheduler: null,
+  musicNextNoteTime: 0,
+  musicBeat: 0,
+  musicBPM: 110,
+  _musicVolume: 0.60,
+  _sfxVolume: 0.65,
+  musicEnabled: true,
+  sfxEnabled: true,
+
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.9;
+    this.masterGain.connect(this.ctx.destination);
+
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = this.sfxEnabled ? this._sfxVolume : 0;
+    this.sfxGain.connect(this.masterGain);
+
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = this.musicEnabled ? this._musicVolume : 0;
+    this.musicGain.connect(this.masterGain);
+  },
+
+  setMusicEnabled(on) {
+    this.musicEnabled = on;
+    if (this.musicGain) this.musicGain.gain.value = on ? this._musicVolume : 0;
+  },
+  setSfxEnabled(on) {
+    this.sfxEnabled = on;
+    if (this.sfxGain) this.sfxGain.gain.value = on ? this._sfxVolume : 0;
+  },
+  toggleMusic() { this.setMusicEnabled(!this.musicEnabled); },
+  toggleSfx() { this.setSfxEnabled(!this.sfxEnabled); },
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
+
+  _tone(freq, type, duration, dest, startTime) {
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const now = this.ctx.currentTime;
+    const t = Math.max(startTime || now, now + 0.001);
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(g);
+    g.connect(dest || this.sfxGain);
+    osc.start(t);
+    osc.stop(t + duration);
+  },
+
+  playCorrect() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'sine', 0.12, null, t);
+    this._tone(659, 'sine', 0.12, null, t + 0.07);
+    this._tone(784, 'sine', 0.18, null, t + 0.14);
+  },
+  playMistake() { if (this.ctx) this._tone(180, 'sawtooth', 0.25); },
+  playLevelUp() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'sine', 0.1, null, t);
+    this._tone(659, 'sine', 0.1, null, t + 0.08);
+    this._tone(784, 'sine', 0.1, null, t + 0.16);
+    this._tone(1047, 'sine', 0.18, null, t + 0.24);
+  },
+  playLevelDown() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'triangle', 0.18, null, t);
+    this._tone(392, 'triangle', 0.28, null, t + 0.13);
+  },
+  playBlinkWarning() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    // Rising three-note warble to draw attention
+    this._tone(440, 'triangle', 0.15, null, t);
+    this._tone(660, 'triangle', 0.15, null, t + 0.12);
+    this._tone(880, 'triangle', 0.22, null, t + 0.24);
+  },
+
+  playSwap() {
+    if (!this.ctx) return;
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const t = this.ctx.currentTime;
+    const bufSize = this.ctx.sampleRate * 0.15;
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.frequency.value = 1500;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.15;
+    src.connect(flt);
+    flt.connect(g);
+    g.connect(this.sfxGain);
+    src.start(t);
+    src.stop(t + 0.15);
+  },
+  playGameOver() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const notes = [784, 740, 698, 659, 622, 587, 554, 523, 494, 440, 392, 349];
+    notes.forEach((f, i) => this._tone(f, 'triangle', 0.12, null, t + i * 0.08));
+  },
+
+  // --- MUSIC ---
+  startMusic() {
+    if (!this.ctx || this.musicPlaying) return;
+    this.musicPlaying = true;
+    this.musicBeat = 0;
+    this._chordIndex = 0;
+    this._chordProgression = [
+      { bass: 55.00, notes: [220, 261.63, 329.63] },
+      { bass: 43.65, notes: [174.61, 220, 261.63] },
+      { bass: 65.41, notes: [261.63, 329.63, 392] },
+      { bass: 49.00, notes: [196, 246.94, 293.66] },
+    ];
+    const begin = () => {
+      this.musicNextNoteTime = this.ctx.currentTime + 0.1;
+      this.musicScheduler = setInterval(() => this._scheduleMusicNotes(), 25);
+    };
+    if (this.ctx.state === 'suspended') this.ctx.resume().then(begin);
+    else begin();
+  },
+  stopMusic() {
+    this.musicPlaying = false;
+    if (this.musicScheduler) { clearInterval(this.musicScheduler); this.musicScheduler = null; }
+  },
+  _scheduleMusicNotes() {
+    if (!this.musicPlaying || !this.ctx) return;
+    if (this.ctx.state === 'suspended') { this.ctx.resume(); return; }
+    const beatDur = 60 / this.musicBPM;
+    const lookAhead = 0.12;
+    if (this.musicNextNoteTime < this.ctx.currentTime - 0.05) {
+      this.musicNextNoteTime = this.ctx.currentTime + 0.1;
+    }
+    while (this.musicNextNoteTime < this.ctx.currentTime + lookAhead) {
+      this._playMusicBeat(this.musicNextNoteTime, this.musicBeat, beatDur);
+      this.musicNextNoteTime += beatDur / 2;
+      this.musicBeat++;
+    }
+  },
+  _playMusicBeat(time, beat, beatDur) {
+    const halfBeat = beatDur / 2;
+    if (beat > 0 && beat % 8 === 0) {
+      this._chordIndex = (this._chordIndex + 1) % this._chordProgression.length;
+    }
+    const chord = this._chordProgression[this._chordIndex];
+    if (beat % 2 === 0) this._musicNote(chord.bass, 'sawtooth', halfBeat * 1.8, 0.22, time, 240);
+    const arpNote = chord.notes[beat % chord.notes.length];
+    this._musicNote(arpNote, 'square', halfBeat * 0.7, 0.08, time, 1800);
+    if (beat % 16 === 0) {
+      chord.notes.forEach((n, i) => {
+        this._musicNote(n * 0.5, 'sine', beatDur * 4, 0.06, time + i * 0.01, 900);
+      });
+    }
+    if (beat % 2 === 1) this._musicNoise(0.018, 0.07, time);
+    if (beat % 4 === 0) this._musicKick(time);
+  },
+  _musicNote(freq, type, dur, vol, time, filterFreq) {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    const flt = this.ctx.createBiquadFilter();
+    osc.type = type;
+    osc.frequency.value = freq;
+    flt.type = 'lowpass';
+    flt.frequency.value = filterFreq || 2000;
+    flt.Q.value = 1;
+    g.gain.setValueAtTime(vol, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    osc.connect(flt); flt.connect(g); g.connect(this.musicGain);
+    osc.start(time); osc.stop(time + dur + 0.05);
+  },
+  _musicNoise(dur, vol, time) {
+    const bufSize = this.ctx.sampleRate * dur;
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'highpass';
+    flt.frequency.value = 7000;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    src.connect(flt); flt.connect(g); g.connect(this.musicGain);
+    src.start(time); src.stop(time + dur + 0.01);
+  },
+  _musicKick(time) {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, time);
+    osc.frequency.exponentialRampToValueAtTime(40, time + 0.05);
+    g.gain.setValueAtTime(0.30, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+    osc.connect(g); g.connect(this.musicGain);
+    osc.start(time); osc.stop(time + 0.14);
+  },
+};
+
+// ============================================================
+// CONTENT — shape + color + fill, three characteristics
+// ============================================================
+class Content {
+  constructor(colorIdx, innerShape, fillType) {
+    this.colorIdx = colorIdx;
+    this.innerShape = innerShape;
+    this.fillType = fillType;
+  }
+
+  static random() {
+    return new Content(
+      Utils.randInt(0, CONTENT_COLORS.length - 1),
+      Utils.pick(INNER_SHAPES),
+      Utils.pick(FILL_TYPES),
+    );
+  }
+
+  sharedCount(other) {
+    let count = 0;
+    if (this.colorIdx === other.colorIdx) count++;
+    if (this.innerShape === other.innerShape) count++;
+    if (this.fillType === other.fillType) count++;
+    return count;
+  }
+}
+
+// ============================================================
+// ITEM — a shape on the orbit circle with a content
+// ============================================================
+class Item {
+  constructor(index, total) {
+    this.index = index;
+    this.content = Content.random();
+    this.orbitAngle = (index / Math.max(1, total)) * Math.PI * 2;
+    this.hidden = false;
+    // Self-rotation state (L8+). Shape spins on its own axis while the
+    // orbit around the big circle stays shared across all items.
+    this.selfRotation = Math.random() * Math.PI * 2;
+    this.spinDir = Utils.pick([1, -1]);
+    this.spinTimer = Utils.randFromRange(CONFIG.individualRotationTimer);
+    // Blink state (during blink-hide transition)
+    this.blinkActive = false;
+    this.blinkTimer = 0;
+    // Position cache
+    this.x = 0;
+    this.y = 0;
+  }
+}
+
+// ============================================================
+// CIRCLE GRID — manages items and swaps
+// ============================================================
+const CircleGrid = {
+  items: [],
+  hiddenCount: 0,
+
+  reset(shapeCount) {
+    this.items = [];
+    this.hiddenCount = 0;
+    for (let i = 0; i < shapeCount; i++) {
+      this.items.push(new Item(i, shapeCount));
+    }
+  },
+
+  // Resize item count (on level up/down)
+  resize(newCount) {
+    if (newCount === this.items.length) return;
+    if (newCount > this.items.length) {
+      const oldCount = this.items.length;
+      for (let i = oldCount; i < newCount; i++) {
+        const it = new Item(i, newCount);
+        this.items.push(it);
+      }
+    } else {
+      this.items.length = newCount;
+      if (this.hiddenCount > newCount) this.hiddenCount = newCount;
+    }
+    this.items.forEach((it, i) => {
+      it.index = i;
+      it.orbitAngle = (i / newCount) * Math.PI * 2;
+    });
+  },
+
+  // Swap event: two random items exchange positions on the orbit.
+  // (There is no longer an outer-container type to flip.)
+  performSwap() {
+    if (this.items.length < 2) return null;
+    const i = Utils.randInt(0, this.items.length - 1);
+    let j = Utils.randInt(0, this.items.length - 1);
+    while (j === i) j = Utils.randInt(0, this.items.length - 1);
+    const a = this.items[i];
+    const b = this.items[j];
+    const tmpAngle = a.orbitAngle;
+    a.orbitAngle = b.orbitAngle;
+    b.orbitAngle = tmpAngle;
+    return 'position';
+  },
+
+  // Pick any two distinct items for the arrow pair.
+  pickPair() {
+    if (this.items.length < 2) return null;
+    const i = Utils.randInt(0, this.items.length - 1);
+    let j = Utils.randInt(0, this.items.length - 1);
+    while (j === i) j = Utils.randInt(0, this.items.length - 1);
+    return { aIdx: i, bIdx: j };
+  },
+
+  // Check whether a given pair is "akin" (shares ≥2 characteristics)
+  pairIsAkin(aIdx, bIdx) {
+    const a = this.items[aIdx].content;
+    const b = this.items[bIdx].content;
+    return a.sharedCount(b) >= 2;
+  },
+
+  // Hidden management
+  hideRandomVisible() {
+    // Exclude BOTH fully-hidden and currently-blinking shapes.
+    // A blinking shape has item.hidden === false until its 4s timer
+    // completes; if we let it be re-picked, its timer gets reset and the
+    // same shape blinks indefinitely while the counter advances without
+    // any other shape ever being affected.
+    const available = this.items.filter(it => !it.hidden && !it.blinkActive);
+    if (available.length === 0) return null;
+    const target = Utils.pick(available);
+    target.blinkActive = true;
+    target.blinkTimer = CONFIG.blinkHideDuration;
+    this.hiddenCount++;
+    AudioEngine.playBlinkWarning();
+    return target;
+  },
+  revealRandomHidden() {
+    // Prefer fully-hidden shapes. If none exist but some are mid-blink,
+    // cancel one of those instead (so demotion still decrements the count).
+    const fullyHidden = this.items.filter(it => it.hidden);
+    const blinking = this.items.filter(it => it.blinkActive && !it.hidden);
+    const pool = fullyHidden.length > 0 ? fullyHidden : blinking;
+    if (pool.length === 0) return null;
+    const target = Utils.pick(pool);
+    if (target.blinkActive) {
+      target.blinkActive = false;
+      target.blinkTimer = 0;
+    }
+    target.hidden = false;
+    this.hiddenCount = Math.max(0, this.hiddenCount - 1);
+    return target;
+  },
+};
+
+// ============================================================
+// LEVEL MANAGER
+// ============================================================
+const LevelManager = {
+  currentLevel: 1,
+
+  reset() { this.currentLevel = 1; },
+
+  shapeCountForLevel(level) {
+    const lvl = Utils.clamp(level, 1, Infinity);
+    const base = CONFIG.startingShapes + (lvl - 1);
+    return Utils.clamp(base, CONFIG.startingShapes, CONFIG.maxShapes);
+  },
+
+  hasDirectionFlipOnClick() { return this.currentLevel >= CONFIG.directionFlipOnClickLevel; },
+  hasIndividualRotation() { return this.currentLevel >= CONFIG.individualRotationLevel; },
+
+  advance() { this.currentLevel++; },
+  demote() { if (this.currentLevel > 1) this.currentLevel--; },
+};
+
+// ============================================================
+// SCORE MANAGER
+// ============================================================
+const ScoreManager = {
+  correct: 0,
+  mistakes: 0,
+  consecutiveMistakes: 0,
+  // Correct-action streak toward the next level up. Incremented on both
+  // correct clicks and correct ignores; reset on any mistake.
+  correctStreak: 0,
+  highestLevel: 1,
+
+  reset() {
+    this.correct = 0;
+    this.mistakes = 0;
+    this.consecutiveMistakes = 0;
+    this.correctStreak = 0;
+    this.highestLevel = 1;
+  },
+
+  recordCorrect() {
+    this.correct++;
+    this.consecutiveMistakes = 0;
+    this.highestLevel = Math.max(this.highestLevel, LevelManager.currentLevel);
+  },
+
+  recordMistake() {
+    this.mistakes++;
+    this.consecutiveMistakes++;
+    this.correctStreak = 0; // any mistake resets progress toward next level
+  },
+
+  shouldDemote() {
+    return this.consecutiveMistakes > 0 && this.consecutiveMistakes % CONFIG.consecutiveMistakesToDemote === 0;
+  },
+
+  isGameOver() {
+    return this.consecutiveMistakes >= CONFIG.consecutiveMistakesToGameOver;
+  },
+
+  getEndStats(gameTimePlayed) {
+    return {
+      correct: this.correct,
+      mistakes: this.mistakes,
+      highestLevel: this.highestLevel,
+      timePlayed: gameTimePlayed,
+    };
+  },
+};
+
+// ============================================================
+// VFX
+// ============================================================
+const VFX = {
+  tiltActive: false, tiltTimer: 0, tiltAngle: 0,
+  smileyActive: false, smileyTimer: 0, smileyOpacity: 0,
+  notifications: [],
+  container: null,
+
+  init(container) { this.container = container; },
+
+  reset() {
+    this.tiltActive = false; this.tiltTimer = 0; this.tiltAngle = 0;
+    this.smileyActive = false; this.smileyTimer = 0; this.smileyOpacity = 0;
+    this.notifications = [];
+    if (this.container) this.container.style.transform = '';
+  },
+
+  triggerMistakeFeedback() {
+    this.tiltActive = true;
+    this.tiltAngle = Utils.randFromRange(CONFIG.tiltAngle) * Utils.pick([1, -1]);
+    this.tiltTimer = CONFIG.mistakeFeedbackDuration;
+    if (this.container) this.container.style.transform = `rotate(${this.tiltAngle}deg)`;
+    this.smileyActive = true;
+    this.smileyTimer = CONFIG.mistakeFeedbackDuration;
+    this.smileyOpacity = 1;
+  },
+
+  addNotification(text, x, y, color) {
+    this.notifications.push({ text, x, y, color, timer: CONFIG.notificationDuration, opacity: 1 });
+  },
+
+  update(dt) {
+    if (this.tiltActive) {
+      this.tiltTimer -= dt;
+      if (this.tiltTimer <= 0) {
+        this.tiltActive = false; this.tiltAngle = 0;
+        if (this.container) this.container.style.transform = '';
+      } else {
+        const progress = 1 - (this.tiltTimer / CONFIG.mistakeFeedbackDuration);
+        const currentAngle = this.tiltAngle * (1 - progress);
+        if (this.container) this.container.style.transform = `rotate(${currentAngle}deg)`;
+      }
+    }
+    if (this.smileyActive) {
+      this.smileyTimer -= dt;
+      this.smileyOpacity = Math.max(0, this.smileyTimer / CONFIG.mistakeFeedbackDuration);
+      if (this.smileyTimer <= 0) { this.smileyActive = false; this.smileyOpacity = 0; }
+    }
+    for (const n of this.notifications) {
+      n.timer -= dt;
+      n.y -= CONFIG.notificationFloatSpeed * dt;
+      n.opacity = Math.max(0, n.timer / CONFIG.notificationDuration);
+    }
+    this.notifications = this.notifications.filter(n => n.timer > 0);
+  },
+};
+
+// ============================================================
+// RENDERER
+// ============================================================
+const Renderer = {
+  canvas: null, ctx: null, width: 0, height: 0, scale: 1,
+
+  init(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.resize();
+  },
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
+    this.canvas.width = this.width * dpr;
+    this.canvas.height = this.height * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.scale = Math.min(this.width, this.height) / 800;
+  },
+
+  getCenterX() { return this.width / 2; },
+  getCenterY() { return this.height / 2; },
+  getOrbitRadius() { return Math.min(this.width, this.height) * CONFIG.circleRadiusFraction; },
+  getShapeSize() {
+    const nominal = CONFIG.shapeSize * this.scale;
+    const r = this.getOrbitRadius();
+    const count = Math.max(4, CircleGrid.items.length || 4);
+    // Arc length between adjacent shapes; leave 25% gap between neighbors
+    const maxFit = (2 * Math.PI * r / count) * 0.75;
+    return Utils.clamp(Math.min(nominal, maxFit), CONFIG.shapeMinSize, CONFIG.shapeMaxSize);
+  },
+
+  clear() {
+    this.ctx.fillStyle = palette.bg;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  },
+
+  drawOrbitCircle(cx, cy, r) {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = palette.ring;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  },
+
+  // Draw a content-shape path centered at (0,0). Shape types:
+  // square, circle, star (5-point), triangle.
+  _shapePath(shapeType, s) {
+    const ctx = this.ctx;
+    const r = s / 2;
+    ctx.beginPath();
+    if (shapeType === 'circle') {
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+    } else if (shapeType === 'square') {
+      ctx.rect(-r, -r, s, s);
+    } else if (shapeType === 'triangle') {
+      ctx.moveTo(0, -r);
+      ctx.lineTo(-r * 0.866, r * 0.5);
+      ctx.lineTo(r * 0.866, r * 0.5);
+      ctx.closePath();
+    } else if (shapeType === 'star') {
+      const outer = r;
+      const inner = r * 0.45;
+      for (let i = 0; i < 10; i++) {
+        const rr = i % 2 === 0 ? outer : inner;
+        const a = -Math.PI / 2 + (i * Math.PI / 5);
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    }
+  },
+
+  // Fill the shape with the given fill type + color.
+  // Shape is already clipped; we fill a bounding square so clipping
+  // defines the shape area.
+  drawFilledShape(shapeType, fillType, color, size) {
+    const ctx = this.ctx;
+    const r = size / 2;
+
+    ctx.save();
+    this._shapePath(shapeType, size);
+    ctx.clip();
+
+    if (fillType === 'solid') {
+      ctx.fillStyle = color;
+      ctx.fillRect(-r, -r, size, size);
+    } else if (fillType === 'dots') {
+      // Dark background, colored dots so the pattern is always visible
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(-r, -r, size, size);
+      ctx.fillStyle = color;
+      const step = size * 0.14;
+      const dotR = size * 0.045;
+      for (let x = -r; x <= r; x += step) {
+        for (let y = -r; y <= r; y += step) {
+          ctx.beginPath();
+          ctx.arc(x, y, dotR, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else if (fillType === 'stripes') {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(-r, -r, size, size);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = size * 0.10;
+      ctx.lineCap = 'square';
+      for (let d = -size; d <= size; d += size * 0.22) {
+        ctx.beginPath();
+        ctx.moveTo(d, -r);
+        ctx.lineTo(d + size, r);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // Outline in palette pink so the shape edge is always visible against
+    // the dark background regardless of content color.
+    ctx.save();
+    this._shapePath(shapeType, size);
+    ctx.strokeStyle = palette.outline;
+    ctx.lineWidth = CONFIG.outerLineWidth;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+  },
+
+  // Draw a full item at its position
+  drawItem(item, blinkHighlight, reveal) {
+    const ctx = this.ctx;
+    const s = this.getShapeSize();
+
+    ctx.save();
+    ctx.translate(item.x, item.y);
+    // Self-spin at L8+ — the shape rotates on its own axis
+    ctx.rotate(item.selfRotation);
+
+    const showContent = !item.hidden || reveal;
+    if (showContent) {
+      const color = CONTENT_COLORS[item.content.colorIdx].hex;
+      this.drawFilledShape(item.content.innerShape, item.content.fillType, color, s);
+    } else {
+      // Hidden: a placeholder circle outlined in pink with a "?" inside
+      ctx.strokeStyle = palette.outline;
+      ctx.lineWidth = CONFIG.outerLineWidth;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 0, s / 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = `bold ${Math.round(s * 0.5)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = palette.text + 'cc';
+      ctx.fillText('?', 0, 0);
+    }
+
+    ctx.restore();
+
+    // Blink highlight (4-second warning before content hides)
+    if (blinkHighlight > 0) {
+      this.drawBlinkHighlight(item.x, item.y, s, blinkHighlight);
+    }
+  },
+
+  // Aggressive pulsing rings + rotating dashed outline + opacity pulse.
+  // Designed to be unmissable so the player focuses on memorizing.
+  drawBlinkHighlight(x, y, s, phase) {
+    const ctx = this.ctx;
+    // phase is the remaining blink timer; use it for animation
+    const pulse = 0.55 + 0.45 * Math.sin(phase * 6);   // ~1Hz pulse
+    const remainingRatio = Utils.clamp(phase / CONFIG.blinkHideDuration, 0, 1);
+    // As time runs out, rings contract toward the shape
+    const urgency = 1 - remainingRatio; // 0 → 1 over the blink duration
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Multiple concentric rings, each with its own radius & alpha
+    const baseR = s * 0.7;
+    for (let i = 0; i < 3; i++) {
+      const ringR = baseR + i * 10 - urgency * 10;
+      const alpha = (pulse * (0.9 - i * 0.22));
+      ctx.strokeStyle = palette.highlight;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 6 - i * 1.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Rotating dashed inner ring for extra drama
+    ctx.globalAlpha = pulse * 0.9;
+    ctx.strokeStyle = palette.highlight;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 6]);
+    ctx.lineDashOffset = -phase * 30;
+    ctx.beginPath();
+    ctx.arc(0, 0, baseR * 0.92, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.restore();
+  },
+
+  // Clock-hand style: two arrows from the big-circle center pointing
+  // outward at the triangle and the star. Each hand has an arrowhead at
+  // its tip (near the shape it points at).
+  drawClockHands(cx, cy, triPos, starPos, time) {
+    const ctx = this.ctx;
+    const pulse = 0.85 + 0.15 * Math.sin(time * 5);
+    ctx.save();
+    ctx.strokeStyle = palette.highlight;
+    ctx.fillStyle = palette.highlight;
+    ctx.lineWidth = CONFIG.clockHandWidth * pulse;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    this._drawClockHand(cx, cy, triPos.x, triPos.y);
+    this._drawClockHand(cx, cy, starPos.x, starPos.y);
+
+    // Small pivot dot at the center
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5 * this.scale * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  },
+
+  _drawClockHand(cx, cy, tx, ty) {
+    const ctx = this.ctx;
+    const dx = tx - cx;
+    const dy = ty - cy;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    // Tip touches the shape's bounding-circle edge (radius = shapeSize/2).
+    // The shape is drawn first; the arrow is drawn on top, so the arrowhead
+    // remains visible right at the shape boundary.
+    const tipPad = this.getShapeSize() * 0.5;
+    const ex = tx - ux * tipPad;
+    const ey = ty - uy * tipPad;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    // Arrowhead at the tip pointing outward
+    const hs = CONFIG.clockHandHeadSize * this.scale;
+    const perpX = -uy;
+    const perpY = ux;
+    ctx.beginPath();
+    ctx.moveTo(ex + ux * hs, ey + uy * hs);
+    ctx.lineTo(ex + perpX * hs * 0.55, ey + perpY * hs * 0.55);
+    ctx.lineTo(ex - perpX * hs * 0.55, ey - perpY * hs * 0.55);
+    ctx.closePath();
+    ctx.fill();
+  },
+
+  drawHUD(game) {
+    const ctx = this.ctx;
+    const s = this.scale;
+
+    // Level (top-left)
+    ctx.font = `bold ${Math.round(18 * s)}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = palette.text + 'cc';
+    ctx.fillText(`LEVEL ${LevelManager.currentLevel}`, 20, 20);
+
+    // Consecutive mistakes dots
+    const maxDots = CONFIG.consecutiveMistakesToGameOver;
+    const dotSize = 5 * s;
+    for (let i = 0; i < maxDots; i++) {
+      ctx.beginPath();
+      ctx.arc(22 + i * (dotSize * 3), 50, dotSize, 0, Math.PI * 2);
+      ctx.fillStyle = i < ScoreManager.consecutiveMistakes ? palette.notifBad + 'cc' : palette.accent + '55';
+      ctx.fill();
+    }
+
+    // Round timer bar (below level, small)
+    const roundBarW = 180 * s;
+    const roundBarH = 5 * s;
+    const roundBarX = 20;
+    const roundBarY = 72;
+    ctx.fillStyle = palette.accent + '44';
+    ctx.fillRect(roundBarX, roundBarY, roundBarW, roundBarH);
+    const roundT = Math.max(0, game.roundTimer / CONFIG.roundDuration);
+    ctx.fillStyle = palette.highlight;
+    ctx.fillRect(roundBarX, roundBarY, roundBarW * roundT, roundBarH);
+
+    // Game time bar (top, centered below toolbar)
+    const gameBarW = Math.min(400 * s, this.width - 40);
+    const gameBarH = 10 * s;
+    const gameBarX = (this.width - gameBarW) / 2;
+    const gameBarY = CONFIG.toolbarTopMargin + CONFIG.toolbarButtonH + 30;
+    ctx.fillStyle = palette.accent + '44';
+    ctx.fillRect(gameBarX, gameBarY, gameBarW, gameBarH);
+    const gameT = Math.max(0, game.gameTimer / CONFIG.totalGameTime);
+    ctx.fillStyle = gameT > 0.3 ? palette.notifGood : palette.notifBad;
+    ctx.fillRect(gameBarX, gameBarY, gameBarW * gameT, gameBarH);
+
+    // Time label
+    ctx.font = `${Math.round(12 * s)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = palette.text + '99';
+    ctx.fillText(`${Math.ceil(game.gameTimer)}s`, gameBarX + gameBarW / 2, gameBarY + gameBarH + 4);
+
+    // Stats (top-right, above toolbar area — actually, below toolbar on right side)
+    ctx.font = `${Math.round(13 * s)}px monospace`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = palette.text + '99';
+    ctx.fillText(`Correct: ${ScoreManager.correct}`, this.width - 20, 20);
+    ctx.fillText(`Mistakes: ${ScoreManager.mistakes}`, this.width - 20, 40);
+  },
+
+  drawNotifications() {
+    const ctx = this.ctx;
+    for (const n of VFX.notifications) {
+      ctx.save();
+      ctx.globalAlpha = n.opacity;
+      ctx.font = `bold ${Math.round(28 * this.scale)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = n.color;
+      ctx.fillText(n.text, n.x, n.y);
+      ctx.restore();
+    }
+  },
+
+  drawSmiley(cx, cy, opacity) {
+    if (opacity <= 0) return;
+    const ctx = this.ctx;
+    const s = CONFIG.smileySize * this.scale;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = '#ff2244';
+    ctx.beginPath();
+    ctx.arc(cx, cy, s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - s * 0.3, cy - s * 0.2, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + s * 0.3, cy - s * 0.2, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy + s * 0.35, s * 0.35, Math.PI * 1.2, Math.PI * 1.8);
+    ctx.stroke();
+    ctx.restore();
+  },
+
+  drawMenuScreen() {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+    this.clear();
+
+    ctx.font = `bold ${Math.round(56 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('AKIN', cx, cy - 220 * this.scale);
+
+    ctx.font = `${Math.round(18 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'bb';
+    ctx.fillText('Match by color, shape, or fill', cx, cy - 175 * this.scale);
+
+    const lines = [
+      'Shapes orbit a circle — square, circle, star, triangle.',
+      'Each has a color (white / red / blue / green) and a fill.',
+      'Clock hands point at two shapes on every round.',
+      'CLICK if their contents share at least 2 of the 3 traits.',
+      'Otherwise do nothing.',
+      '',
+      'Five seconds per decision. Two minutes total.',
+    ];
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + '88';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, cx, cy + (-55 + i * 22) * this.scale);
+    });
+
+    ctx.font = `bold ${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'cc';
+    ctx.fillText('CHOOSE DIFFICULTY', cx, cy + 130 * this.scale);
+  },
+
+  drawMenuButtons(buttons, hovered) {
+    const ctx = this.ctx;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < buttons.length; i++) {
+      const b = buttons[i];
+      const isHover = i === hovered;
+      ctx.fillStyle = isHover ? palette.highlight + '33' : palette.accent + '22';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = isHover ? palette.highlight : palette.accent;
+      ctx.lineWidth = isHover ? 2.5 : 1.5;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+      ctx.fillStyle = isHover ? palette.highlight : palette.text;
+      ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2);
+      ctx.font = `${Math.round(11 * this.scale)}px monospace`;
+      ctx.fillStyle = palette.text + '77';
+      ctx.fillText(b.sub, b.x + b.w / 2, b.y + b.h + 12 * this.scale);
+    }
+  },
+
+  drawGameOverScreen(stats) {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+    this.clear();
+
+    ctx.font = `bold ${Math.round(40 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('GAME OVER', cx, cy - 130 * this.scale);
+
+    ctx.font = `bold ${Math.round(28 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.notifGood;
+    ctx.fillText(`${stats.correct} CORRECT`, cx, cy - 75 * this.scale);
+
+    const lines = [
+      `Mistakes: ${stats.mistakes}`,
+      `Highest Level: ${stats.highestLevel}`,
+      `Time Played: ${Math.round(CONFIG.totalGameTime - stats.timePlayed)}s`,
+    ];
+    ctx.font = `${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'cc';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, cx, cy + (-10 + i * 30) * this.scale);
+    });
+
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + '66';
+    ctx.fillText('Click anywhere to play again', cx, cy + 140 * this.scale);
+  },
+
+  drawPauseOverlay() {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.font = `bold ${Math.round(56 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('PAUSED', this.getCenterX(), this.getCenterY());
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'aa';
+    ctx.fillText('Click PLAY in the toolbar to resume', this.getCenterX(), this.getCenterY() + 50 * this.scale);
+    ctx.restore();
+  },
+
+  drawInstructionsOverlay(game) {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+    const s = this.scale;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const panelW = Math.min(this.width - 80, 580);
+    const panelH = Math.min(this.height - 120, 500);
+    const panelX = cx - panelW / 2;
+    const panelY = cy - panelH / 2;
+    ctx.fillStyle = palette.bg;
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+    ctx.font = `bold ${Math.round(28 * s)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('HOW TO PLAY', cx, panelY + 24);
+
+    const lines = [
+      'Shapes orbit a big circle. Each has three traits:',
+      '  - color: white / red / blue / green',
+      '  - shape: square / circle / star / triangle',
+      '  - fill:  solid / dots / stripes',
+      '',
+      'Clock hands from the center pick two shapes each round.',
+      'CLICK if their contents share AT LEAST 2 of the 3 traits.',
+      'Otherwise do nothing and wait.',
+      '',
+      '5 seconds per decision. 2 minutes total.',
+      'Higher levels: direction flips on click, shapes hide,',
+      'and shapes start spinning on their own axes.',
+    ];
+    ctx.font = `${Math.round(13 * s)}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = palette.text + 'dd';
+    let lineY = panelY + 70;
+    for (const line of lines) {
+      ctx.fillText(line, panelX + 30, lineY);
+      lineY += 19 * s;
+    }
+
+    const btnW = 100 * s;
+    const btnH = 32 * s;
+    const btnX = cx - btnW / 2;
+    const btnY = panelY + panelH - btnH - 18;
+    ctx.fillStyle = palette.accent + '55';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    ctx.strokeStyle = palette.highlight;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(btnX, btnY, btnW, btnH);
+    ctx.font = `bold ${Math.round(14 * s)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('CLOSE', cx, btnY + btnH / 2);
+
+    game.instructionsCloseBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+    ctx.restore();
+  },
+};
+
+// ============================================================
+// CONFIG PANEL — editable dashboard for all numeric settings
+// ============================================================
+// Describes which CONFIG keys appear in the dashboard, grouped into
+// sections. `range: true` means the value is [min, max] stored as an array
+// and the UI shows two inputs. Unit shown in the label.
+const CONFIG_META = [
+  { section: 'Round & Game Timing', keys: [
+    { key: 'roundDuration',        label: 'Round duration (s)',        step: 0.5, min: 1 },
+    { key: 'totalGameTime',        label: 'Total game time (s)',       step: 5,   min: 10 },
+    { key: 'swapInterval',         label: 'Swap interval (s)',         step: 0.5, min: 1 },
+    { key: 'hiddenPeekInterval',   label: 'Hidden peek interval (s)',  step: 0.5, min: 0.5 },
+    { key: 'hiddenPeekDuration',   label: 'Hidden peek duration (s)',  step: 0.1, min: 0.1 },
+    { key: 'mistakeHaltDuration',  label: 'Mistake halt duration (s)', step: 0.5, min: 0 },
+    { key: 'blinkHideDuration',    label: 'Blink-hide warning (s)',    step: 0.5, min: 0.5 },
+  ]},
+  { section: 'Progression', keys: [
+    { key: 'startingShapes',            label: 'Starting shape count',        step: 1, min: 2, max: 24 },
+    { key: 'maxShapes',                 label: 'Max shape count',             step: 1, min: 2, max: 24 },
+    { key: 'hiddenStartLevel',          label: 'Hidden start level',          step: 1, min: 1 },
+    { key: 'maxHidden',                 label: 'Max hidden count',            step: 1, min: 0 },
+    { key: 'correctActionsToAdvance',   label: 'Correct actions to advance',  step: 1, min: 1 },
+    { key: 'directionFlipOnClickLevel', label: 'Direction-flip start level',  step: 1, min: 1 },
+    { key: 'individualRotationLevel',   label: 'Self-spin start level',       step: 1, min: 1 },
+  ]},
+  { section: 'Scoring & Mistakes', keys: [
+    { key: 'consecutiveMistakesToDemote',   label: 'Mistakes to demote',    step: 1, min: 1 },
+    { key: 'consecutiveMistakesToGameOver', label: 'Mistakes to game over', step: 1, min: 1 },
+  ]},
+  { section: 'Motion', keys: [
+    { key: 'baseOrbitSpeed',          label: 'Orbit speed (rad/s)',       step: 0.05, min: 0 },
+    { key: 'selfSpinSpeed',           label: 'Self-spin speed (rad/s)',   step: 0.05, min: 0 },
+    { key: 'individualRotationTimer', label: 'Self-spin timer (s)',       step: 0.5,  min: 0.5, range: true },
+    { key: 'individualFlipProbability', label: 'Self-spin keep-dir prob', step: 0.05, min: 0, max: 1 },
+  ]},
+  { section: 'Rendering', keys: [
+    { key: 'circleRadiusFraction', label: 'Orbit radius fraction', step: 0.01, min: 0.1, max: 0.5 },
+    { key: 'shapeSize',            label: 'Shape size (px)',       step: 2,    min: 20 },
+    { key: 'shapeMinSize',         label: 'Shape min size (px)',   step: 2,    min: 20 },
+    { key: 'shapeMaxSize',         label: 'Shape max size (px)',   step: 2,    min: 20 },
+    { key: 'outerLineWidth',       label: 'Shape outline width',   step: 0.5,  min: 0.5 },
+    { key: 'clockHandWidth',       label: 'Clock hand width',      step: 0.5,  min: 0.5 },
+    { key: 'clockHandHeadSize',    label: 'Clock arrowhead size',  step: 1,    min: 1 },
+  ]},
+  { section: 'Feedback', keys: [
+    { key: 'mistakeFeedbackDuration', label: 'Tilt/smiley duration (s)', step: 0.1, min: 0 },
+    { key: 'notificationDuration',    label: 'Notification duration (s)', step: 0.1, min: 0 },
+    { key: 'notificationFloatSpeed',  label: 'Notification float speed', step: 5,   min: 0 },
+    { key: 'smileySize',              label: 'Smiley size',              step: 2,   min: 10 },
+    { key: 'tiltAngle',               label: 'Tilt angle (deg)',         step: 0.5, min: 0, range: true },
+  ]},
+];
+
+const ConfigPanel = {
+  el: null,
+  body: null,
+  visible: false,
+  pending: {}, // key → new value (scalar) or [a, b] (range)
+
+  init() {
+    this.el = document.getElementById('config-panel');
+    this.body = document.getElementById('config-body');
+    this.copyBtn = document.getElementById('config-copy');
+    document.getElementById('config-save').addEventListener('click', () => this.save());
+    document.getElementById('config-cancel').addEventListener('click', () => this.cancel());
+    this.copyBtn.addEventListener('click', () => this.copy());
+    this._buildUI();
+  },
+
+  _buildUI() {
+    this.body.innerHTML = '';
+    for (const section of CONFIG_META) {
+      const secDiv = document.createElement('div');
+      secDiv.className = 'config-section';
+      const h3 = document.createElement('h3');
+      h3.textContent = section.section;
+      secDiv.appendChild(h3);
+      for (const field of section.keys) {
+        secDiv.appendChild(this._buildRow(field));
+      }
+      this.body.appendChild(secDiv);
+    }
+  },
+
+  _currentValue(key) {
+    // Pending if set, else CONFIG live value
+    return this.pending[key] !== undefined ? this.pending[key] : CONFIG[key];
+  },
+
+  _buildRow(field) {
+    const row = document.createElement('div');
+    row.className = 'config-row';
+    const label = document.createElement('label');
+    label.textContent = field.label;
+    row.appendChild(label);
+
+    const current = this._currentValue(field.key);
+    if (field.range) {
+      const i1 = this._makeInput(field, current[0]);
+      i1.addEventListener('change', (e) => this._updateRange(field.key, 0, e.target));
+      row.appendChild(i1);
+      const dash = document.createElement('span');
+      dash.className = 'dash';
+      dash.textContent = '—';
+      row.appendChild(dash);
+      const i2 = this._makeInput(field, current[1]);
+      i2.addEventListener('change', (e) => this._updateRange(field.key, 1, e.target));
+      row.appendChild(i2);
+    } else {
+      const inp = this._makeInput(field, current);
+      inp.addEventListener('change', (e) => this._updateScalar(field.key, e.target));
+      row.appendChild(inp);
+    }
+    return row;
+  },
+
+  _makeInput(field, value) {
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.step = field.step != null ? field.step : 1;
+    if (field.min != null) inp.min = field.min;
+    if (field.max != null) inp.max = field.max;
+    inp.value = value;
+    return inp;
+  },
+
+  _parse(inputEl) {
+    const v = parseFloat(inputEl.value);
+    return isFinite(v) ? v : null;
+  },
+
+  _updateScalar(key, inputEl) {
+    const v = this._parse(inputEl);
+    if (v == null) return;
+    this.pending[key] = v;
+  },
+
+  _updateRange(key, idx, inputEl) {
+    const v = this._parse(inputEl);
+    if (v == null) return;
+    if (!Array.isArray(this.pending[key])) {
+      this.pending[key] = (CONFIG[key] || [0, 0]).slice();
+    }
+    this.pending[key][idx] = v;
+  },
+
+  show() {
+    this.visible = true;
+    this.el.classList.add('visible');
+    Game.configPanelOpen = true;
+  },
+  hide() {
+    this.visible = false;
+    this.el.classList.remove('visible');
+    Game.configPanelOpen = false;
+  },
+  toggle() { if (this.visible) this.hide(); else this.show(); },
+
+  save() {
+    // Pending stays; will be flushed to CONFIG on next Game.startGame()
+    this.hide();
+  },
+
+  // Copy all dashboard-exposed config values to the clipboard as JS
+  // property-assignment lines that can be pasted directly into CONFIG.
+  // Uses the currently-displayed values (pending merged over CONFIG) so you
+  // can tune, hit COPY, and share the result.
+  copy() {
+    const lines = [];
+    for (const section of CONFIG_META) {
+      lines.push(`// ${section.section}`);
+      for (const field of section.keys) {
+        const v = this._currentValue(field.key);
+        let serialized;
+        if (Array.isArray(v)) {
+          serialized = '[' + v.map(x => this._formatNumber(x)).join(', ') + ']';
+        } else {
+          serialized = this._formatNumber(v);
+        }
+        lines.push(`${field.key}: ${serialized},`);
+      }
+      lines.push('');
+    }
+    const text = lines.join('\n');
+
+    const flash = (label) => {
+      const prev = this.copyBtn.textContent;
+      this.copyBtn.textContent = label;
+      setTimeout(() => { this.copyBtn.textContent = prev; }, 1200);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => flash('COPIED'))
+        .catch(() => this._fallbackCopy(text, flash));
+    } else {
+      this._fallbackCopy(text, flash);
+    }
+  },
+
+  _fallbackCopy(text, flash) {
+    // Old-browser fallback: hidden textarea + execCommand
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    flash(ok ? 'COPIED' : 'FAILED');
+  },
+
+  _formatNumber(v) {
+    if (typeof v !== 'number') return String(v);
+    // Drop trailing zeros from decimals for readability
+    if (Number.isInteger(v)) return String(v);
+    return parseFloat(v.toFixed(4)).toString();
+  },
+
+  cancel() {
+    this.pending = {};
+    // Rebuild so inputs revert to current CONFIG values
+    this._buildUI();
+    this.hide();
+  },
+
+  applyPending() {
+    for (const [k, v] of Object.entries(this.pending)) {
+      if (Array.isArray(v)) CONFIG[k] = v.slice();
+      else CONFIG[k] = v;
+    }
+    this.pending = {};
+    // Rebuild so the UI reflects the newly-applied values next time it opens
+    if (this.body) this._buildUI();
+  },
+};
+
+// ============================================================
+// TOOLBAR
+// ============================================================
+const Toolbar = {
+  buttons: [], hovered: -1,
+
+  layout() {
+    const w = CONFIG.toolbarButtonW;
+    const h = CONFIG.toolbarButtonH;
+    const gap = CONFIG.toolbarGap;
+    const top = CONFIG.toolbarTopMargin;
+    const items = [
+      { id: 'pause', label: () => Game.isPaused ? 'PLAY' : 'PAUSE' },
+      { id: 'restart', label: () => 'RESTART' },
+      { id: 'instructions', label: () => 'HELP' },
+      { id: 'config', label: () => 'CFG' },
+      { id: 'music', label: () => AudioEngine.musicEnabled ? 'MUSIC' : 'MUSIC×' },
+      { id: 'sfx', label: () => AudioEngine.sfxEnabled ? 'SFX' : 'SFX×' },
+    ];
+    const totalW = items.length * w + (items.length - 1) * gap;
+    const startX = (Renderer.width - totalW) / 2;
+    this.buttons = items.map((it, i) => ({
+      id: it.id, label: it.label,
+      x: startX + i * (w + gap),
+      y: top, w, h,
+    }));
+  },
+
+  hitTest(x, y) {
+    for (let i = 0; i < this.buttons.length; i++) {
+      const b = this.buttons[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+    }
+    return -1;
+  },
+
+  handleClick(idx) {
+    const b = this.buttons[idx];
+    if (!b) return;
+    switch (b.id) {
+      case 'pause':        Game.togglePause(); break;
+      case 'restart':      Game.restart(); break;
+      case 'instructions': Game.toggleInstructions(); break;
+      case 'config':       ConfigPanel.toggle(); break;
+      case 'music':        AudioEngine.toggleMusic(); break;
+      case 'sfx':          AudioEngine.toggleSfx(); break;
+    }
+  },
+
+  draw(ctx) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(11 * Renderer.scale)}px monospace`;
+    for (let i = 0; i < this.buttons.length; i++) {
+      const b = this.buttons[i];
+      const isHover = i === this.hovered;
+      const available = this._isAvailable(b.id);
+      const muted = (b.id === 'music' && !AudioEngine.musicEnabled) ||
+                    (b.id === 'sfx' && !AudioEngine.sfxEnabled);
+
+      let bg;
+      if (muted) bg = palette.notifBad + '44';
+      else if (isHover) bg = palette.highlight + '44';
+      else bg = palette.bg + 'cc';
+      ctx.fillStyle = bg;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+
+      let stroke;
+      if (muted) stroke = palette.notifBad;
+      else if (isHover) stroke = palette.highlight;
+      else if (available) stroke = palette.accent;
+      else stroke = palette.accent + '66';
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = isHover ? 2 : 1.5;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+      let fg;
+      if (muted) fg = palette.notifBad;
+      else if (isHover) fg = palette.highlight;
+      else if (available) fg = palette.text;
+      else fg = palette.text + '88';
+      ctx.fillStyle = fg;
+      ctx.fillText(b.label(), b.x + b.w / 2, b.y + b.h / 2 + 1);
+    }
+  },
+
+  _isAvailable(id) {
+    if (id === 'pause' || id === 'restart') return Game.state === 'PLAYING';
+    return true;
+  },
+};
+
+// ============================================================
+// GAME
+// ============================================================
+const Game = {
+  state: 'MENU', // MENU | PLAYING | GAME_OVER
+  isPaused: false,
+  showingInstructions: false,
+
+  // Timers
+  gameTimer: 0,
+  roundTimer: 0,
+  swapTimer: 0,
+  time: 0, // for animations
+
+  // Current arrow pair
+  currentPair: null, // { aIdx, bIdx, akin: boolean }
+
+  // Orbit state
+  globalOrbitDir: 1,
+
+  // Mistake halt: when a mistake involves a pair with a hidden shape, the
+  // game freezes for mistakeHaltDuration and both shapes in the pair are
+  // forced visible via haltRevealIndices.
+  mistakeHaltTimer: 0,
+  haltRevealIndices: [],
+
+  // Hidden-content peek: every hiddenPeekInterval seconds a random hidden
+  // shape is revealed for hiddenPeekDuration seconds. Alternates phases
+  // 'idle' and 'showing'.
+  hiddenPeekPhase: 'idle',
+  hiddenPeekTimer: 0,
+  hiddenPeekIdx: -1,
+  hiddenPeekShowing: false,
+
+  // Config panel open flag — pauses game logic like the instructions overlay
+  configPanelOpen: false,
+
+  endStats: null,
+  menuButtons: [],
+  hoveredButton: -1,
+  lastStartLevel: 1,
+  instructionsCloseBtn: null,
+
+  init() {
+    const canvas = document.getElementById('canvas');
+    const container = document.getElementById('game-container');
+    Renderer.init(canvas);
+    VFX.init(container);
+    ConfigPanel.init();
+
+    window.addEventListener('resize', () => Renderer.resize());
+
+    let lastInputTime = 0;
+    const handleInput = (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      if (now - lastInputTime < 100) return;
+      lastInputTime = now;
+      AudioEngine.init();
+      AudioEngine.resume();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      this.onClick(x, y);
+    };
+    canvas.addEventListener('pointerdown', handleInput);
+
+    canvas.addEventListener('pointermove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      Toolbar.hovered = Toolbar.hitTest(x, y);
+      if (this.state === 'MENU') this.hoveredButton = this._buttonAt(x, y);
+      else this.hoveredButton = -1;
+      canvas.style.cursor = (Toolbar.hovered >= 0 || this.hoveredButton >= 0) ? 'pointer' : 'default';
+    });
+
+    let last = performance.now();
+    const loop = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+      this.update(dt);
+      this.render();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  },
+
+  _layoutMenuButtons() {
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const s = Renderer.scale;
+    const bw = 140 * s;
+    const bh = 50 * s;
+    const gap = 20 * s;
+    const total = bw * CONFIG.difficulties.length + gap * (CONFIG.difficulties.length - 1);
+    const startX = cx - total / 2;
+    const y = cy + 160 * s;
+    this.menuButtons = CONFIG.difficulties.map((d, i) => ({
+      label: d.label,
+      sub: `Start at level ${d.startLevel}`,
+      startLevel: d.startLevel,
+      x: startX + i * (bw + gap),
+      y: y,
+      w: bw,
+      h: bh,
+    }));
+  },
+
+  _buttonAt(x, y) {
+    for (let i = 0; i < this.menuButtons.length; i++) {
+      const b = this.menuButtons[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+    }
+    return -1;
+  },
+
+  // --- STATE TRANSITIONS ---
+  startGame(startLevel) {
+    // Apply any buffered config changes from the dashboard now (before the
+    // game reads any of the values).
+    ConfigPanel.applyPending();
+
+    this.state = 'PLAYING';
+    this.lastStartLevel = startLevel || 1;
+    palette = Utils.pick(PALETTES);
+    LevelManager.reset();
+    if (startLevel && startLevel > 1) {
+      LevelManager.currentLevel = startLevel;
+    }
+    ScoreManager.reset();
+    ScoreManager.highestLevel = LevelManager.currentLevel;
+    VFX.reset();
+    this.isPaused = false;
+    this.showingInstructions = false;
+    this.gameTimer = CONFIG.totalGameTime;
+    this.roundTimer = CONFIG.roundDuration;
+    this.swapTimer = CONFIG.swapInterval;
+    this.time = 0;
+    this.globalOrbitDir = 1;
+    this.mistakeHaltTimer = 0;
+    this.haltRevealIndices = [];
+    this.hiddenPeekPhase = 'idle';
+    this.hiddenPeekTimer = CONFIG.hiddenPeekInterval;
+    this.hiddenPeekIdx = -1;
+    this.hiddenPeekShowing = false;
+
+    // Set up initial grid. Hiding only happens via explicit level-up events,
+    // so HARD starts with 0 hidden even though the level is past 6.
+    CircleGrid.reset(LevelManager.shapeCountForLevel(LevelManager.currentLevel));
+
+    this._pickArrow();
+    AudioEngine.startMusic();
+  },
+
+  restart() {
+    if (this.state !== 'PLAYING') return;
+    AudioEngine.stopMusic();
+    this.startGame(this.lastStartLevel);
+  },
+
+  togglePause() {
+    if (this.state !== 'PLAYING') return;
+    this.isPaused = !this.isPaused;
+  },
+
+  toggleInstructions() {
+    this.showingInstructions = !this.showingInstructions;
+  },
+
+  endGame() {
+    this.state = 'GAME_OVER';
+    this.endStats = ScoreManager.getEndStats(this.gameTimer);
+    AudioEngine.stopMusic();
+    AudioEngine.playGameOver();
+    VFX.reset();
+  },
+
+  returnToMenu() {
+    this.state = 'MENU';
+    palette = Utils.pick(PALETTES);
+  },
+
+  // --- ARROW / PAIR ---
+  _pickArrow() {
+    const pair = CircleGrid.pickPair();
+    if (!pair) {
+      this.currentPair = null;
+      return;
+    }
+    pair.akin = CircleGrid.pairIsAkin(pair.aIdx, pair.bIdx);
+    this.currentPair = pair;
+    this.roundTimer = CONFIG.roundDuration;
+  },
+
+  _advanceRound() {
+    this._pickArrow();
+  },
+
+  // --- INPUT ---
+  onClick(x, y) {
+    if (this.showingInstructions) {
+      const c = this.instructionsCloseBtn;
+      if (c && x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
+        this.showingInstructions = false;
+      }
+      return;
+    }
+
+    const tbIdx = Toolbar.hitTest(x, y);
+    if (tbIdx >= 0) { Toolbar.handleClick(tbIdx); return; }
+
+    if (this.state === 'MENU') {
+      const btn = this._buttonAt(x, y);
+      if (btn >= 0) this.startGame(this.menuButtons[btn].startLevel);
+      return;
+    }
+    if (this.state === 'GAME_OVER') {
+      this.returnToMenu();
+      return;
+    }
+    if (this.state !== 'PLAYING') return;
+    if (this.isPaused) return;
+    if (this.mistakeHaltTimer > 0) return; // halt in progress, ignore game clicks
+    if (!this.currentPair) return;
+
+    // L3+: the shared orbit direction flips on every click
+    if (LevelManager.hasDirectionFlipOnClick()) {
+      this.globalOrbitDir *= -1;
+    }
+
+    // Click during a round means the player claims "akin".
+    // The handler is responsible for advancing the round (or starting a halt).
+    if (this.currentPair.akin) {
+      this._handleCorrect();
+    } else {
+      this._handleWrongClick();
+    }
+  },
+
+  _handleCorrect() { this._applyCorrectAction(); },
+
+  // Shared path for correct click and correct ignore.
+  _applyCorrectAction() {
+    ScoreManager.recordCorrect();
+    ScoreManager.correctStreak++;
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const remaining = CONFIG.correctActionsToAdvance - ScoreManager.correctStreak;
+    const label = remaining > 0
+      ? `+1 (${ScoreManager.correctStreak}/${CONFIG.correctActionsToAdvance})`
+      : '+1';
+    VFX.addNotification(label, cx, cy, palette.notifGood);
+    AudioEngine.playCorrect();
+    if (ScoreManager.correctStreak >= CONFIG.correctActionsToAdvance) {
+      ScoreManager.correctStreak = 0;
+      this._levelUp();
+    } else {
+      this._advanceRound();
+    }
+  },
+
+  _handleWrongClick() {
+    ScoreManager.recordMistake();
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    VFX.addNotification('WRONG!', cx, cy, palette.notifBad);
+    VFX.triggerMistakeFeedback();
+    AudioEngine.playMistake();
+    this._finishMistake();
+  },
+
+  _handleMissed() {
+    ScoreManager.recordMistake();
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    VFX.addNotification('MISSED!', cx, cy, palette.notifBad);
+    VFX.triggerMistakeFeedback();
+    AudioEngine.playMistake();
+    this._finishMistake();
+  },
+
+  _handleCorrectIgnore() { this._applyCorrectAction(); },
+
+  // Shared path for wrong-click and missed-click. Applies demote logic if
+  // applicable, then either halts the game (if a hidden shape was involved)
+  // or advances to the next round.
+  _finishMistake() {
+    const hiddenInPair = this._pairHasHidden();
+
+    if (ScoreManager.isGameOver()) {
+      this.endGame();
+      return;
+    }
+    if (ScoreManager.shouldDemote()) {
+      LevelManager.demote();
+      if (CircleGrid.hiddenCount > 0) CircleGrid.revealRandomHidden();
+      CircleGrid.resize(LevelManager.shapeCountForLevel(LevelManager.currentLevel));
+      AudioEngine.playLevelDown();
+      VFX.addNotification(`LEVEL ${LevelManager.currentLevel}`, Renderer.getCenterX(), Renderer.getCenterY() - 60, palette.notifBad);
+    }
+
+    if (hiddenInPair) {
+      this._startMistakeHalt();
+    } else {
+      this._advanceRound();
+    }
+  },
+
+  _pairHasHidden() {
+    if (!this.currentPair) return false;
+    const a = CircleGrid.items[this.currentPair.aIdx];
+    const b = CircleGrid.items[this.currentPair.bIdx];
+    return !!(a && a.hidden) || !!(b && b.hidden);
+  },
+
+  _startMistakeHalt() {
+    this.mistakeHaltTimer = CONFIG.mistakeHaltDuration;
+    if (this.currentPair) {
+      this.haltRevealIndices = [this.currentPair.aIdx, this.currentPair.bIdx];
+    } else {
+      this.haltRevealIndices = [];
+    }
+  },
+
+  _levelUp() {
+    LevelManager.advance();
+    CircleGrid.resize(LevelManager.shapeCountForLevel(LevelManager.currentLevel));
+    // Blink-hide one shape iff we're now at/past the hidden threshold and
+    // haven't reached the max hidden cap.
+    if (LevelManager.currentLevel >= CONFIG.hiddenStartLevel &&
+        CircleGrid.hiddenCount < CONFIG.maxHidden) {
+      CircleGrid.hideRandomVisible();
+    }
+    AudioEngine.playLevelUp();
+    VFX.addNotification(`LEVEL ${LevelManager.currentLevel}`, Renderer.getCenterX(), Renderer.getCenterY() - 60, palette.highlight);
+    this._advanceRound();
+  },
+
+  // --- UPDATE ---
+  update(dt) {
+    Toolbar.layout();
+
+    if (this.state === 'MENU') {
+      this._layoutMenuButtons();
+      return;
+    }
+    if (this.state === 'GAME_OVER') return;
+    if (this.isPaused || this.showingInstructions || this.configPanelOpen) return;
+
+    // Mistake halt: VFX continues (notifications/smiley fade) but every
+    // other game system freezes — timers, orbit, spin, swap, blink.
+    if (this.mistakeHaltTimer > 0) {
+      VFX.update(dt);
+      this.mistakeHaltTimer -= dt;
+      if (this.mistakeHaltTimer <= 0) {
+        this.haltRevealIndices = [];
+        this._advanceRound();
+      }
+      return;
+    }
+
+    this.time += dt;
+    VFX.update(dt);
+
+    // Game over clock
+    this.gameTimer -= dt;
+    if (this.gameTimer <= 0) {
+      this.endGame();
+      return;
+    }
+
+    // Round timer
+    this.roundTimer -= dt;
+    if (this.roundTimer <= 0) {
+      // Time's up — correct ignore or missed. The handler advances the round
+      // or starts a mistake halt as appropriate.
+      if (this.currentPair) {
+        if (this.currentPair.akin) {
+          this._handleMissed();
+        } else {
+          this._handleCorrectIgnore();
+        }
+      }
+      if (this.state !== 'PLAYING') return;
+    }
+
+    // Swap timer
+    this.swapTimer -= dt;
+    if (this.swapTimer <= 0) {
+      this.swapTimer = CONFIG.swapInterval;
+      CircleGrid.performSwap();
+      AudioEngine.playSwap();
+    }
+
+    // Hidden peek: alternate 'idle' (interval − duration) and 'showing' (duration)
+    this.hiddenPeekTimer -= dt;
+    if (this.hiddenPeekTimer <= 0) {
+      if (this.hiddenPeekShowing) {
+        this.hiddenPeekShowing = false;
+        this.hiddenPeekIdx = -1;
+        this.hiddenPeekTimer = Math.max(0.1, CONFIG.hiddenPeekInterval - CONFIG.hiddenPeekDuration);
+      } else {
+        const hidden = CircleGrid.items.filter(it => it.hidden);
+        if (hidden.length > 0) {
+          this.hiddenPeekIdx = Utils.pick(hidden).index;
+          this.hiddenPeekShowing = true;
+          this.hiddenPeekTimer = CONFIG.hiddenPeekDuration;
+        } else {
+          this.hiddenPeekTimer = CONFIG.hiddenPeekInterval;
+        }
+      }
+    }
+
+    // Update items: orbit (all shapes share globalOrbitDir) + per-shape self-spin at L8+
+    const orbitSpeed = CONFIG.baseOrbitSpeed;
+    const hasSpin = LevelManager.hasIndividualRotation();
+    for (const item of CircleGrid.items) {
+      // Orbit around the big circle — shared direction
+      item.orbitAngle += orbitSpeed * this.globalOrbitDir * dt;
+
+      // Self-spin (L8+) — each shape spins on its own axis
+      if (hasSpin) {
+        item.spinTimer -= dt;
+        if (item.spinTimer <= 0) {
+          // With probability individualFlipProbability, KEEP direction; else flip
+          if (!Utils.chance(CONFIG.individualFlipProbability)) {
+            item.spinDir *= -1;
+          }
+          item.spinTimer = Utils.randFromRange(CONFIG.individualRotationTimer);
+        }
+        item.selfRotation += CONFIG.selfSpinSpeed * item.spinDir * dt;
+      }
+
+      // Blink hide transition
+      if (item.blinkActive) {
+        item.blinkTimer -= dt;
+        if (item.blinkTimer <= 0) {
+          item.blinkActive = false;
+          item.hidden = true;
+          // Wipe any memory the player built up during the blink: once the
+          // shape is hidden, color/fill/shape all change to a fresh random
+          // content. The player learns the NEW content only via peek/halt.
+          item.content = Content.random();
+        }
+      }
+    }
+
+    // Compute positions
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const r = Renderer.getOrbitRadius();
+    for (const item of CircleGrid.items) {
+      item.x = cx + Math.cos(item.orbitAngle) * r;
+      item.y = cy + Math.sin(item.orbitAngle) * r;
+    }
+  },
+
+  // --- RENDER ---
+  render() {
+    if (this.state === 'MENU') {
+      Renderer.clear();
+      Renderer.drawMenuScreen();
+      Renderer.drawMenuButtons(this.menuButtons, this.hoveredButton);
+      Toolbar.draw(Renderer.ctx);
+      if (this.showingInstructions) Renderer.drawInstructionsOverlay(this);
+      return;
+    }
+
+    if (this.state === 'GAME_OVER') {
+      Renderer.drawGameOverScreen(this.endStats);
+      Toolbar.draw(Renderer.ctx);
+      if (this.showingInstructions) Renderer.drawInstructionsOverlay(this);
+      return;
+    }
+
+    // PLAYING
+    Renderer.clear();
+
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const r = Renderer.getOrbitRadius();
+    Renderer.drawOrbitCircle(cx, cy, r);
+
+    // Draw items first so the clock hands can render on top (so their
+    // arrowheads are visible right at the shape edge).
+    for (const item of CircleGrid.items) {
+      const blink = item.blinkActive ? item.blinkTimer : 0;
+      const reveal = this.haltRevealIndices.includes(item.index) ||
+                     (this.hiddenPeekShowing && this.hiddenPeekIdx === item.index);
+      Renderer.drawItem(item, blink, reveal);
+    }
+
+    // Clock-hand arrows drawn ON TOP so their tips touch the content edge
+    if (this.currentPair) {
+      const a = CircleGrid.items[this.currentPair.aIdx];
+      const b = CircleGrid.items[this.currentPair.bIdx];
+      if (a && b) {
+        Renderer.drawClockHands(cx, cy, a, b, this.time);
+      }
+    }
+
+    // Smiley
+    if (VFX.smileyActive) {
+      Renderer.drawSmiley(cx, cy, VFX.smileyOpacity);
+    }
+
+    // Notifications
+    Renderer.drawNotifications();
+
+    // HUD
+    Renderer.drawHUD(this);
+
+    // Pause overlay
+    if (this.isPaused) Renderer.drawPauseOverlay();
+
+    // Toolbar
+    Toolbar.draw(Renderer.ctx);
+
+    // Instructions overlay
+    if (this.showingInstructions) Renderer.drawInstructionsOverlay(this);
+  },
+};
+
+// ============================================================
+// BOOTSTRAP
+// ============================================================
+Game.init();
+</script>
+</body>
+</html>

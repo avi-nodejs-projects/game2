@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verge</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #game-container {
+    width: 100%; height: 100%;
+    transition: transform 0.1s ease-out;
+    transform-origin: center center;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="canvas"></canvas>
+</div>
+<script>
+// ============================================================
+// CONFIG — All tunable numbers in one place
+// ============================================================
+const CONFIG = {
+  // Level progression
+  winsToAdvance: [2, 4],
+  demotionChance: 0.80,
+
+  // Mistakes & game over
+  mistakesToGameOver: [6, 8],
+  falseAccusationChance: 0.05,
+
+  // Scoring
+  correctPointsChance: 0.80,
+  basePoints: 100,
+  pointsPerLevel: 50,
+
+  // Highlight timing
+  highlightDuration: [2, 3],
+
+  // Board state reshuffling
+  boardReshuffleInterval: [4, 8],
+
+  // Speed
+  baseSelfRotationSpeed: 0.5,
+  baseOrbitSpeed: 0.3,
+  speedMultiplierPerIncrease: 1.3,
+
+  // Direction switches
+  rotationSwitchInterval: [8, 10],
+  orbitSwitchInterval: [7, 9],
+
+  // Adaptive difficulty
+  adaptiveBiasWeight: 0.6,
+
+  // Visual
+  tiltAngle: [2, 5],
+  mistakeFeedbackDuration: 0.5,
+  orbitRadiusFraction: 0.28,
+  boardSizeFraction: 0.07,
+  minBoardSize: 50,
+  maxBoardSize: 110,
+
+  // Level 1 specific
+  level1CircleAppearInterval: [2, 4],
+  level1CircleHideInterval: [1, 3],
+
+  // Difficulty starting levels
+  difficulties: [
+    { label: 'EASY',   startLevel: 1 },
+    { label: 'MEDIUM', startLevel: 6 },
+    { label: 'HARD',   startLevel: 12 },
+  ],
+
+  // Level definitions
+  levelBoardCounts: { 1:1, 2:2, 3:3, 4:4, 6:5, 7:6, 9:7, 10:8 },
+  speedIncreaseLevels: [5, 8, 11],
+  directionSwitchLevel: 12,
+  mixedRotationLevel: 13,
+  orbitSwitchLevel: 14,
+  // How many boards are highlighted simultaneously at each level threshold.
+  // Looked up like levelBoardCounts: highest key <= currentLevel wins.
+  highlightCountByLevel: { 1: 1, 15: 2, 20: 3 },
+
+  // Post-max escalation threshold (speed / duration start shrinking past this)
+  postMaxLevel: 15,
+  postMaxSpeedIncrement: 0.10,
+  postMaxHighlightReduction: 0.05,
+  maxBoards: 10,
+
+  // Notification
+  notificationDuration: 1.5,
+  notificationFloatSpeed: 60,
+
+  // Smiley
+  smileySize: 40,
+};
+
+// ============================================================
+// UTILS
+// ============================================================
+const Utils = {
+  randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; },
+  randFloat(min, max) { return Math.random() * (max - min) + min; },
+  randFromRange(arr) { return this.randFloat(arr[0], arr[1]); },
+  randIntFromRange(arr) { return this.randInt(arr[0], arr[1]); },
+  chance(p) { return Math.random() < p; },
+  clamp(v, min, max) { return Math.max(min, Math.min(max, v)); },
+  lerp(a, b, t) { return a + (b - a) * t; },
+  pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; },
+  shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  },
+};
+
+// ============================================================
+// PALETTES
+// ============================================================
+const PALETTES = [
+  {
+    name: 'Synthwave',
+    bg: '#1a0a2e', boardLines: '#ff6ec7', xColor: '#00fff7',
+    oColor: '#ff6ec7', highlight: '#f5e642', accent: '#b967ff',
+    text: '#ffffff', notifGood: '#00ff88', notifBad: '#ff3366',
+  },
+  {
+    name: 'Ocean',
+    bg: '#0b1628', boardLines: '#3a86a8', xColor: '#00d4aa',
+    oColor: '#5fb8e0', highlight: '#f0e68c', accent: '#1e6091',
+    text: '#d0e8f0', notifGood: '#00e09e', notifBad: '#e05050',
+  },
+  {
+    name: 'Sunset',
+    bg: '#1c0f0a', boardLines: '#e07040', xColor: '#ffd166',
+    oColor: '#ef476f', highlight: '#ffc8dd', accent: '#ff7b00',
+    text: '#ffeedd', notifGood: '#a8e06e', notifBad: '#ff4444',
+  },
+  {
+    name: 'Neon',
+    bg: '#0a0a0a', boardLines: '#39ff14', xColor: '#ff00ff',
+    oColor: '#39ff14', highlight: '#ffff00', accent: '#00ffff',
+    text: '#ffffff', notifGood: '#39ff14', notifBad: '#ff0055',
+  },
+  {
+    name: 'Forest',
+    bg: '#0d1f0d', boardLines: '#5c8a4d', xColor: '#a3d977',
+    oColor: '#d4a86a', highlight: '#f0e68c', accent: '#2e6b2e',
+    text: '#d0e0c0', notifGood: '#88dd55', notifBad: '#cc5544',
+  },
+  {
+    name: 'Midnight',
+    bg: '#0a0e1a', boardLines: '#4466aa', xColor: '#88bbff',
+    oColor: '#cc88ff', highlight: '#ffd700', accent: '#2244aa',
+    text: '#c0d0f0', notifGood: '#66ddaa', notifBad: '#ff5577',
+  },
+];
+
+let palette = Utils.pick(PALETTES);
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+const AudioEngine = {
+  ctx: null,
+  masterGain: null,
+  musicGain: null,
+  sfxGain: null,
+  musicPlaying: false,
+  musicScheduler: null,
+  musicNextNoteTime: 0,
+  musicBeat: 0,
+  musicBPM: 110,
+
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.7;
+    this.masterGain.connect(this.ctx.destination);
+
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = 0.45;
+    this.sfxGain.connect(this.masterGain);
+
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = 0.35;
+    this.musicGain.connect(this.masterGain);
+  },
+
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  },
+
+  // --- SFX ---
+  _tone(freq, type, duration, dest, startTime) {
+    const t = startTime || this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(g);
+    g.connect(dest || this.sfxGain);
+    osc.start(t);
+    osc.stop(t + duration);
+  },
+
+  playCorrect() {
+    if (!this.ctx) return;
+    this._tone(523, 'sine', 0.15);
+    this._tone(659, 'sine', 0.15, null, this.ctx.currentTime + 0.08);
+  },
+
+  playMistake() {
+    if (!this.ctx) return;
+    this._tone(180, 'sawtooth', 0.25);
+  },
+
+  playLevelUp() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'sine', 0.12, null, t);
+    this._tone(659, 'sine', 0.12, null, t + 0.1);
+    this._tone(784, 'sine', 0.18, null, t + 0.2);
+  },
+
+  playLevelDown() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this._tone(523, 'triangle', 0.2, null, t);
+    this._tone(392, 'triangle', 0.3, null, t + 0.15);
+  },
+
+  playCircleJump() {
+    if (!this.ctx) return;
+    this._tone(1200, 'sine', 0.03);
+  },
+
+  playGameOver() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const notes = [784, 740, 698, 659, 622, 587, 554, 523, 494, 440, 392, 349];
+    notes.forEach((f, i) => this._tone(f, 'triangle', 0.12, null, t + i * 0.08));
+  },
+
+  // --- MUSIC ---
+  startMusic() {
+    if (!this.ctx || this.musicPlaying) return;
+    this.musicPlaying = true;
+    this.musicBeat = 0;
+    this._chordIndex = 0;
+    this._chordProgression = [
+      { bass: 55.00, notes: [220, 261.63, 329.63] },    // Am
+      { bass: 43.65, notes: [174.61, 220, 261.63] },     // F
+      { bass: 65.41, notes: [261.63, 329.63, 392] },     // C
+      { bass: 49.00, notes: [196, 246.94, 293.66] },     // G
+    ];
+    const begin = () => {
+      this.musicNextNoteTime = this.ctx.currentTime + 0.1;
+      this.musicScheduler = setInterval(() => this._scheduleMusicNotes(), 25);
+    };
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().then(begin);
+    } else {
+      begin();
+    }
+  },
+
+  stopMusic() {
+    this.musicPlaying = false;
+    if (this.musicScheduler) {
+      clearInterval(this.musicScheduler);
+      this.musicScheduler = null;
+    }
+  },
+
+  _scheduleMusicNotes() {
+    if (!this.musicPlaying || !this.ctx) return;
+    const beatDur = 60 / this.musicBPM;
+    const lookAhead = 0.12;
+    // If we fell behind (e.g. context was suspended at init), snap forward to avoid
+    // scheduling a burst of past-due notes.
+    if (this.musicNextNoteTime < this.ctx.currentTime - 0.05) {
+      this.musicNextNoteTime = this.ctx.currentTime + 0.1;
+    }
+    while (this.musicNextNoteTime < this.ctx.currentTime + lookAhead) {
+      this._playMusicBeat(this.musicNextNoteTime, this.musicBeat, beatDur);
+      this.musicNextNoteTime += beatDur / 2; // 8th notes
+      this.musicBeat++;
+    }
+  },
+
+  _playMusicBeat(time, beat, beatDur) {
+    const halfBeat = beatDur / 2;
+    const chord = this._chordProgression[this._chordIndex];
+
+    // Change chord every 4 beats (8 eighth-notes)
+    if (beat > 0 && beat % 8 === 0) {
+      this._chordIndex = (this._chordIndex + 1) % this._chordProgression.length;
+    }
+    const currentChord = this._chordProgression[this._chordIndex];
+
+    // Bass — on every beat (every 2 eighth-notes)
+    if (beat % 2 === 0) {
+      this._musicNote(currentChord.bass, 'sawtooth', halfBeat * 1.8, 0.12, time, 200);
+    }
+
+    // Arpeggio — every eighth-note
+    const arpNote = currentChord.notes[beat % currentChord.notes.length];
+    this._musicNote(arpNote, 'square', halfBeat * 0.7, 0.04, time, 1500);
+
+    // Pad — sustain on beats 0 and 8 of a 16-beat cycle
+    if (beat % 16 === 0) {
+      currentChord.notes.forEach((n, i) => {
+        this._musicNote(n * 0.5, 'sine', beatDur * 4, 0.03, time + i * 0.01, 800);
+      });
+    }
+
+    // Hi-hat — every other eighth note
+    if (beat % 2 === 1) {
+      this._musicNoise(0.015, 0.04, time);
+    }
+    // Kick — every 4 eighth-notes (every 2 beats)
+    if (beat % 4 === 0) {
+      this._musicKick(time);
+    }
+  },
+
+  _musicNote(freq, type, dur, vol, time, filterFreq) {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    const flt = this.ctx.createBiquadFilter();
+    osc.type = type;
+    osc.frequency.value = freq;
+    flt.type = 'lowpass';
+    flt.frequency.value = filterFreq || 2000;
+    flt.Q.value = 1;
+    g.gain.setValueAtTime(vol, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    osc.connect(flt);
+    flt.connect(g);
+    g.connect(this.musicGain);
+    osc.start(time);
+    osc.stop(time + dur + 0.05);
+  },
+
+  _musicNoise(dur, vol, time) {
+    const bufSize = this.ctx.sampleRate * dur;
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'highpass';
+    flt.frequency.value = 7000;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    src.connect(flt);
+    flt.connect(g);
+    g.connect(this.musicGain);
+    src.start(time);
+    src.stop(time + dur + 0.01);
+  },
+
+  _musicKick(time) {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(40, time + 0.05);
+    g.gain.setValueAtTime(0.15, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+    osc.connect(g);
+    g.connect(this.musicGain);
+    osc.start(time);
+    osc.stop(time + 0.12);
+  },
+};
+
+// ============================================================
+// BOARD LOGIC — tic-tac-toe state generation
+// ============================================================
+const BoardLogic = {
+  // lines: indices of all possible winning lines
+  lines: [
+    [0,1,2],[3,4,5],[6,7,8], // rows
+    [0,3,6],[1,4,7],[2,5,8], // cols
+    [0,4,8],[2,4,6],         // diags
+  ],
+
+  hasCompleteLine(grid) {
+    for (const [a, b, c] of this.lines) {
+      const v = grid[a];
+      if (v !== 0 && v === grid[b] && v === grid[c]) return true;
+    }
+    return false;
+  },
+
+  isOneStepFromVictory(grid) {
+    // A grid that's already won is NOT one step from victory — the game is over.
+    if (this.hasCompleteLine(grid)) return false;
+    for (const [a, b, c] of this.lines) {
+      const vals = [grid[a], grid[b], grid[c]];
+      const xs = vals.filter(v => v === 1).length;
+      const os = vals.filter(v => v === 2).length;
+      const empties = vals.filter(v => v === 0).length;
+      if (empties === 1 && (xs === 2 || os === 2)) return true;
+    }
+    return false;
+  },
+
+  generateValidBoard() {
+    // Try to generate a plausible board that is one step from victory
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const grid = this._randomPlausibleBoard();
+      if (this.isOneStepFromVictory(grid)) return grid;
+    }
+    // Fallback: minimal safe one-step-from-victory grid
+    // X X .
+    // . . .
+    // O O .   (X's top row threatens; no completed line)
+    return [1, 1, 0, 0, 0, 0, 2, 2, 0];
+  },
+
+  generateInvalidBoard() {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const grid = this._randomPlausibleBoard();
+      if (!this.isOneStepFromVictory(grid) && grid.filter(v => v !== 0).length >= 2) return grid;
+    }
+    // Fallback: simple non-threatening board
+    return [1, 0, 2, 0, 0, 0, 2, 0, 1];
+  },
+
+  _randomPlausibleBoard() {
+    const grid = [0,0,0,0,0,0,0,0,0];
+    const totalPieces = Utils.randInt(3, 6);
+    const xCount = Math.ceil(totalPieces / 2);
+    const oCount = totalPieces - xCount;
+    const positions = Utils.shuffle([0,1,2,3,4,5,6,7,8]);
+    for (let i = 0; i < xCount; i++) grid[positions[i]] = 1;
+    for (let i = xCount; i < xCount + oCount; i++) grid[positions[i]] = 2;
+    return grid;
+  },
+
+  _balanceBoard(grid) {
+    let xs = grid.filter(v => v === 1).length;
+    let os = grid.filter(v => v === 2).length;
+    // X should have equal or one more than O
+    while (xs - os > 1) {
+      const xi = grid.findIndex(v => v === 1);
+      if (xi >= 0) { grid[xi] = 0; xs--; }
+    }
+    while (os > xs) {
+      const oi = grid.findIndex(v => v === 2);
+      if (oi >= 0) { grid[oi] = 0; os--; }
+    }
+    return grid;
+  },
+};
+
+// ============================================================
+// BOARD CLASS
+// ============================================================
+class Board {
+  constructor(index, total) {
+    this.index = index;
+    this.grid = BoardLogic.generateValidBoard();
+    this.isValid = true;
+    this.orbitAngle = (index / Math.max(total, 1)) * Math.PI * 2;
+    this.selfRotation = Math.random() * Math.PI * 2;
+    this.rotationDirection = Utils.pick([1, -1]);
+    this.reshuffleTimer = Utils.randFromRange(CONFIG.boardReshuffleInterval);
+    this.x = 0;
+    this.y = 0;
+  }
+
+  // Board physics are now updated directly in Game.update() for proper
+  // direction handling. This method is kept for potential standalone use.
+  update(dt, selfRotSpeed, orbitSpeed, orbitDir) {
+    this.selfRotation += selfRotSpeed * this.rotationDirection * dt;
+    this.orbitAngle += orbitSpeed * orbitDir * dt;
+    this.reshuffleTimer -= dt;
+    if (this.reshuffleTimer <= 0) {
+      this.reshuffleTimer = Utils.randFromRange(CONFIG.boardReshuffleInterval);
+      return true;
+    }
+    return false;
+  }
+
+  reshuffle(shouldBeValid) {
+    if (shouldBeValid) {
+      this.grid = BoardLogic.generateValidBoard();
+      this.isValid = true;
+    } else {
+      this.grid = BoardLogic.generateInvalidBoard();
+      this.isValid = false;
+    }
+  }
+
+  computePosition(cx, cy, orbitRadius) {
+    this.x = cx + Math.cos(this.orbitAngle) * orbitRadius;
+    this.y = cy + Math.sin(this.orbitAngle) * orbitRadius;
+  }
+}
+
+// ============================================================
+// ADAPTIVE SYSTEM
+// ============================================================
+const AdaptiveSystem = {
+  misclickCount: 0,
+  missCount: 0,
+
+  reset() {
+    this.misclickCount = 0;
+    this.missCount = 0;
+  },
+
+  recordMisclick() { this.misclickCount++; },
+  recordMiss() { this.missCount++; },
+
+  shouldHighlightValidBoard() {
+    const total = this.misclickCount + this.missCount;
+    if (total < 3) return Utils.chance(0.5); // not enough data
+    const bias = CONFIG.adaptiveBiasWeight;
+    let validProb = 0.5;
+    if (this.misclickCount > this.missCount) {
+      // Player misclicks more — show more invalid boards to tempt
+      validProb = 0.5 - (bias - 0.5);
+    } else if (this.missCount > this.misclickCount) {
+      // Player misses more — show more valid boards to pressure
+      validProb = 0.5 + (bias - 0.5);
+    }
+    validProb = Utils.clamp(validProb, 0.2, 0.8);
+    return Utils.chance(validProb);
+  },
+
+  shouldBoardBeValid() {
+    return this.shouldHighlightValidBoard();
+  },
+};
+
+// ============================================================
+// LEVEL MANAGER
+// ============================================================
+const LevelManager = {
+  currentLevel: 1,
+  speedMultiplier: 1,
+  directionSwitchTimer: 0,
+  orbitSwitchTimer: 0,
+  orbitDirection: 1,
+  globalRotationFlip: 1,
+
+  reset() {
+    this.currentLevel = 1;
+    this.speedMultiplier = 1;
+    this.directionSwitchTimer = 0;
+    this.orbitSwitchTimer = 0;
+    this.orbitDirection = 1;
+    this.globalRotationFlip = 1;
+  },
+
+  advance() {
+    this.currentLevel++;
+    this._recomputeSpeed();
+    return this.currentLevel;
+  },
+
+  demote() {
+    if (this.currentLevel > 1) this.currentLevel--;
+    this._recomputeSpeed();
+    return this.currentLevel;
+  },
+
+  _recomputeSpeed() {
+    let increases = 0;
+    for (const lvl of CONFIG.speedIncreaseLevels) {
+      if (this.currentLevel >= lvl) increases++;
+    }
+    // Post-max escalation
+    if (this.currentLevel > CONFIG.postMaxLevel) {
+      increases += Math.floor((this.currentLevel - CONFIG.postMaxLevel) * CONFIG.postMaxSpeedIncrement / 0.1);
+    }
+    this.speedMultiplier = Math.pow(CONFIG.speedMultiplierPerIncrease, increases);
+  },
+
+  getBoardCount() {
+    let count = 1;
+    const keys = Object.keys(CONFIG.levelBoardCounts).map(Number).sort((a, b) => a - b);
+    for (const k of keys) {
+      if (this.currentLevel >= k) count = CONFIG.levelBoardCounts[k];
+    }
+    // Post-max: potentially add boards
+    if (this.currentLevel > CONFIG.postMaxLevel) {
+      count = Math.min(count + Math.floor((this.currentLevel - CONFIG.postMaxLevel) / 3), CONFIG.maxBoards);
+    }
+    return count;
+  },
+
+  getSelfRotationSpeed() {
+    return CONFIG.baseSelfRotationSpeed * this.speedMultiplier;
+  },
+
+  getOrbitSpeed() {
+    return CONFIG.baseOrbitSpeed * this.speedMultiplier;
+  },
+
+  hasDirectionSwitches() { return this.currentLevel >= CONFIG.directionSwitchLevel; },
+  hasMixedRotation() { return this.currentLevel >= CONFIG.mixedRotationLevel; },
+  hasOrbitSwitches() { return this.currentLevel >= CONFIG.orbitSwitchLevel; },
+
+  getHighlightCount() {
+    let count = 1;
+    const keys = Object.keys(CONFIG.highlightCountByLevel).map(Number).sort((a, b) => a - b);
+    for (const k of keys) {
+      if (this.currentLevel >= k) count = CONFIG.highlightCountByLevel[k];
+    }
+    return count;
+  },
+
+  getHighlightDuration() {
+    let [lo, hi] = CONFIG.highlightDuration;
+    if (this.currentLevel > CONFIG.postMaxLevel) {
+      const reduction = (this.currentLevel - CONFIG.postMaxLevel) * CONFIG.postMaxHighlightReduction;
+      lo = Math.max(1, lo - reduction);
+      hi = Math.max(1.5, hi - reduction);
+    }
+    return Utils.randFloat(lo, hi);
+  },
+
+  update(dt) {
+    if (this.hasDirectionSwitches()) {
+      this.directionSwitchTimer -= dt;
+      if (this.directionSwitchTimer <= 0) {
+        this.directionSwitchTimer = Utils.randFromRange(CONFIG.rotationSwitchInterval);
+        this.globalRotationFlip *= -1;
+      }
+    }
+    if (this.hasOrbitSwitches()) {
+      this.orbitSwitchTimer -= dt;
+      if (this.orbitSwitchTimer <= 0) {
+        this.orbitSwitchTimer = Utils.randFromRange(CONFIG.orbitSwitchInterval);
+        this.orbitDirection *= -1;
+      }
+    }
+  },
+};
+
+// ============================================================
+// SCORE MANAGER
+// ============================================================
+const ScoreManager = {
+  trueScore: 0,
+  realMistakes: 0,
+  correctClicks: 0,
+  totalMisclicks: 0,
+  totalMisses: 0,
+  falseAccusations: 0,
+  highestLevel: 1,
+  winsThisLevel: 0,
+  winsToAdvance: 0,
+  mistakesToGameOver: 0,
+
+  reset() {
+    this.trueScore = 0;
+    this.realMistakes = 0;
+    this.correctClicks = 0;
+    this.totalMisclicks = 0;
+    this.totalMisses = 0;
+    this.falseAccusations = 0;
+    this.highestLevel = 1;
+    this.winsThisLevel = 0;
+    this.winsToAdvance = Utils.randIntFromRange(CONFIG.winsToAdvance);
+    this.mistakesToGameOver = Utils.randIntFromRange(CONFIG.mistakesToGameOver);
+  },
+
+  recordCorrect(level) {
+    this.correctClicks++;
+    this.highestLevel = Math.max(this.highestLevel, level);
+    this.winsThisLevel++;
+
+    // Calculate points
+    let points;
+    if (Utils.chance(CONFIG.correctPointsChance)) {
+      points = CONFIG.basePoints + (level - 1) * CONFIG.pointsPerLevel;
+    } else {
+      const effectiveLevel = Math.max(1, level - 1);
+      points = CONFIG.basePoints + (effectiveLevel - 1) * CONFIG.pointsPerLevel;
+    }
+    this.trueScore += points;
+
+    // False accusation?
+    const isFalse = Utils.chance(CONFIG.falseAccusationChance);
+    if (isFalse) {
+      this.falseAccusations++;
+      return { points, displayedPoints: -points, isFalseAccusation: true, displayWrong: true };
+    }
+    return { points, displayedPoints: points, isFalseAccusation: false, displayWrong: false };
+  },
+
+  recordMistake(type) {
+    this.realMistakes++;
+    if (type === 'misclick') this.totalMisclicks++;
+    else this.totalMisses++;
+
+    const shouldDemote = Utils.chance(CONFIG.demotionChance);
+    const isGameOver = this.realMistakes >= this.mistakesToGameOver;
+    return { shouldDemote, isGameOver };
+  },
+
+  checkAdvancement() {
+    if (this.winsThisLevel >= this.winsToAdvance) {
+      this.winsThisLevel = 0;
+      this.winsToAdvance = Utils.randIntFromRange(CONFIG.winsToAdvance);
+      return true;
+    }
+    return false;
+  },
+
+  getEndStats() {
+    return {
+      trueScore: this.trueScore,
+      correctClicks: this.correctClicks,
+      totalMisclicks: this.totalMisclicks,
+      totalMisses: this.totalMisses,
+      highestLevel: this.highestLevel,
+      falseAccusations: this.falseAccusations,
+      realMistakes: this.realMistakes,
+    };
+  },
+};
+
+// ============================================================
+// VISUAL EFFECTS
+// ============================================================
+const VFX = {
+  tiltActive: false,
+  tiltTimer: 0,
+  tiltAngle: 0,
+  smileyActive: false,
+  smileyTimer: 0,
+  smileyOpacity: 0,
+  notifications: [],
+  container: null,
+
+  init(container) { this.container = container; },
+
+  reset() {
+    this.tiltActive = false;
+    this.tiltTimer = 0;
+    this.tiltAngle = 0;
+    this.smileyActive = false;
+    this.smileyTimer = 0;
+    this.smileyOpacity = 0;
+    this.notifications = [];
+    if (this.container) this.container.style.transform = '';
+  },
+
+  triggerMistakeFeedback() {
+    this.tiltActive = true;
+    this.tiltAngle = Utils.randFromRange(CONFIG.tiltAngle) * Utils.pick([1, -1]);
+    this.tiltTimer = CONFIG.mistakeFeedbackDuration;
+    if (this.container) {
+      this.container.style.transform = `rotate(${this.tiltAngle}deg)`;
+    }
+    this.smileyActive = true;
+    this.smileyTimer = CONFIG.mistakeFeedbackDuration;
+    this.smileyOpacity = 1;
+  },
+
+  addNotification(text, x, y, color) {
+    this.notifications.push({
+      text, x, y, color,
+      timer: CONFIG.notificationDuration,
+      opacity: 1,
+    });
+  },
+
+  update(dt) {
+    if (this.tiltActive) {
+      this.tiltTimer -= dt;
+      if (this.tiltTimer <= 0) {
+        this.tiltActive = false;
+        this.tiltAngle = 0;
+        if (this.container) this.container.style.transform = '';
+      } else {
+        const progress = 1 - (this.tiltTimer / CONFIG.mistakeFeedbackDuration);
+        const currentAngle = this.tiltAngle * (1 - progress);
+        if (this.container) {
+          this.container.style.transform = `rotate(${currentAngle}deg)`;
+        }
+      }
+    }
+
+    if (this.smileyActive) {
+      this.smileyTimer -= dt;
+      this.smileyOpacity = Math.max(0, this.smileyTimer / CONFIG.mistakeFeedbackDuration);
+      if (this.smileyTimer <= 0) {
+        this.smileyActive = false;
+        this.smileyOpacity = 0;
+      }
+    }
+
+    for (const n of this.notifications) {
+      n.timer -= dt;
+      n.y -= CONFIG.notificationFloatSpeed * dt;
+      n.opacity = Math.max(0, n.timer / CONFIG.notificationDuration);
+    }
+    this.notifications = this.notifications.filter(n => n.timer > 0);
+  },
+};
+
+// ============================================================
+// RENDERER
+// ============================================================
+const Renderer = {
+  canvas: null,
+  ctx: null,
+  width: 0,
+  height: 0,
+  scale: 1,
+
+  init(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.resize();
+  },
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
+    this.canvas.width = this.width * dpr;
+    this.canvas.height = this.height * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.scale = Math.min(this.width, this.height) / 800;
+  },
+
+  getCenterX() { return this.width / 2; },
+  getCenterY() { return this.height / 2; },
+
+  getOrbitRadius() {
+    return Math.min(this.width, this.height) * CONFIG.orbitRadiusFraction;
+  },
+
+  getBoardSize() {
+    let s = Math.min(this.width, this.height) * CONFIG.boardSizeFraction;
+    return Utils.clamp(s, CONFIG.minBoardSize, CONFIG.maxBoardSize);
+  },
+
+  clear() {
+    this.ctx.fillStyle = palette.bg;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  },
+
+  drawOrbitPath(cx, cy, radius) {
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    this.ctx.strokeStyle = palette.accent + '33';
+    this.ctx.lineWidth = 1;
+    this.ctx.stroke();
+  },
+
+  drawBoard(board, size) {
+    const ctx = this.ctx;
+    const half = size / 2;
+    const cell = size / 3;
+
+    ctx.save();
+    ctx.translate(board.x, board.y);
+    ctx.rotate(board.selfRotation);
+
+    // Grid lines
+    ctx.strokeStyle = palette.boardLines;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    for (let i = 1; i < 3; i++) {
+      // Vertical
+      ctx.beginPath();
+      ctx.moveTo(-half + i * cell, -half);
+      ctx.lineTo(-half + i * cell, half);
+      ctx.stroke();
+      // Horizontal
+      ctx.beginPath();
+      ctx.moveTo(-half, -half + i * cell);
+      ctx.lineTo(half, -half + i * cell);
+      ctx.stroke();
+    }
+
+    // Pieces
+    const pad = cell * 0.18;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const val = board.grid[r * 3 + c];
+        const cx = -half + c * cell + cell / 2;
+        const cy = -half + r * cell + cell / 2;
+        const pSize = cell / 2 - pad;
+        if (val === 1) {
+          // X
+          ctx.strokeStyle = palette.xColor;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(cx - pSize, cy - pSize);
+          ctx.lineTo(cx + pSize, cy + pSize);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(cx + pSize, cy - pSize);
+          ctx.lineTo(cx - pSize, cy + pSize);
+          ctx.stroke();
+        } else if (val === 2) {
+          // O
+          ctx.strokeStyle = palette.oColor;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, pSize, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.restore();
+  },
+
+  drawHighlight(board, size, time) {
+    const ctx = this.ctx;
+    const pulse = 0.85 + 0.15 * Math.sin((time || 0) * 4);
+    const radius = size * 0.75 * pulse;
+    // Glow layers
+    for (let i = 3; i >= 0; i--) {
+      ctx.beginPath();
+      ctx.arc(board.x, board.y, radius + i * 5, 0, Math.PI * 2);
+      ctx.strokeStyle = palette.highlight + (i === 0 ? 'cc' : (i === 1 ? '66' : '22'));
+      ctx.lineWidth = (3 - i * 0.5) * pulse;
+      ctx.stroke();
+    }
+  },
+
+  drawSmiley(cx, cy, opacity) {
+    if (opacity <= 0) return;
+    const ctx = this.ctx;
+    const s = CONFIG.smileySize * this.scale;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+
+    // Face
+    ctx.fillStyle = '#ff2244';
+    ctx.beginPath();
+    ctx.arc(cx, cy, s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - s * 0.3, cy - s * 0.2, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + s * 0.3, cy - s * 0.2, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Frown
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy + s * 0.35, s * 0.35, Math.PI * 1.2, Math.PI * 1.8);
+    ctx.stroke();
+
+    ctx.restore();
+  },
+
+  drawNotifications() {
+    const ctx = this.ctx;
+    for (const n of VFX.notifications) {
+      ctx.save();
+      ctx.globalAlpha = n.opacity;
+      ctx.font = `bold ${Math.round(22 * this.scale)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = n.color;
+      ctx.fillText(n.text, n.x, n.y);
+      ctx.restore();
+    }
+  },
+
+  drawHUD(level) {
+    const ctx = this.ctx;
+    ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = palette.text + 'aa';
+    ctx.fillText(`LEVEL ${level}`, 20, 35);
+
+    // Mistakes remaining indicator (subtle dots)
+    const remaining = ScoreManager.mistakesToGameOver - ScoreManager.realMistakes;
+    const dotSize = 5 * this.scale;
+    for (let i = 0; i < ScoreManager.mistakesToGameOver; i++) {
+      ctx.beginPath();
+      ctx.arc(20 + i * (dotSize * 3), 55, dotSize, 0, Math.PI * 2);
+      ctx.fillStyle = i < ScoreManager.realMistakes ? palette.notifBad + '88' : palette.accent + '44';
+      ctx.fill();
+    }
+  },
+
+  drawMenuScreen() {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+
+    this.clear();
+
+    // Title
+    ctx.font = `bold ${Math.round(48 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('VERGE', cx, cy - 260 * this.scale);
+
+    // Subtitle
+    ctx.font = `${Math.round(18 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'bb';
+    ctx.fillText('A perception game about focus and resilience', cx, cy - 225 * this.scale);
+
+    // Instructions
+    const lines = [
+      'Watch the spinning tic-tac-toe boards.',
+      'Click when a highlighted board is one step from victory.',
+      'Don\'t click when it\'s not.',
+      'Trust your judgment — the game will try to deceive you.',
+    ];
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + '88';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, cx, cy + (45 + i * 22) * this.scale);
+    });
+
+    // "Choose difficulty" label
+    ctx.font = `bold ${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'cc';
+    ctx.fillText('CHOOSE DIFFICULTY', cx, cy + 145 * this.scale);
+  },
+
+  drawMenuButtons(buttons, hovered) {
+    const ctx = this.ctx;
+    ctx.textAlign = 'center';
+    for (let i = 0; i < buttons.length; i++) {
+      const b = buttons[i];
+      const isHover = i === hovered;
+
+      // Button background
+      ctx.fillStyle = isHover ? palette.highlight + '33' : palette.accent + '22';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+
+      // Border
+      ctx.strokeStyle = isHover ? palette.highlight : palette.accent;
+      ctx.lineWidth = isHover ? 2.5 : 1.5;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+      // Label
+      ctx.font = `bold ${Math.round(18 * this.scale)}px monospace`;
+      ctx.fillStyle = isHover ? palette.highlight : palette.text;
+      ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 2);
+
+      // Sub-label
+      ctx.font = `${Math.round(11 * this.scale)}px monospace`;
+      ctx.fillStyle = palette.text + '77';
+      ctx.fillText(b.sub, b.x + b.w / 2, b.y + b.h + 16 * this.scale);
+    }
+  },
+
+  drawGameOverScreen(stats) {
+    const ctx = this.ctx;
+    const cx = this.getCenterX();
+    const cy = this.getCenterY();
+
+    this.clear();
+
+    ctx.font = `bold ${Math.round(40 * this.scale)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = palette.highlight;
+    ctx.fillText('GAME OVER', cx, cy - 130 * this.scale);
+
+    ctx.font = `bold ${Math.round(28 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.notifGood;
+    ctx.fillText(`TRUE SCORE: ${stats.trueScore}`, cx, cy - 75 * this.scale);
+
+    const statLines = [
+      `Correct Clicks: ${stats.correctClicks}`,
+      `Misclicks: ${stats.totalMisclicks}`,
+      `Missed Opportunities: ${stats.totalMisses}`,
+      `Highest Level: ${stats.highestLevel}`,
+      `False Accusations: ${stats.falseAccusations}`,
+      `Total Real Mistakes: ${stats.realMistakes}`,
+    ];
+    ctx.font = `${Math.round(16 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + 'cc';
+    statLines.forEach((line, i) => {
+      ctx.fillText(line, cx, cy + (-30 + i * 30) * this.scale);
+    });
+
+    ctx.font = `${Math.round(14 * this.scale)}px monospace`;
+    ctx.fillStyle = palette.text + '66';
+    ctx.fillText('Click anywhere to play again', cx, cy + 170 * this.scale);
+  },
+};
+
+// ============================================================
+// GAME
+// ============================================================
+const Game = {
+  state: 'MENU', // MENU | PLAYING | GAME_OVER
+  boards: [],
+  highlightedIndices: [],
+  highlightTimer: 0,
+  highlightVisible: true,        // for level 1 flicker
+  highlightVisibilityTimer: 0,
+  clickedThisHighlight: false,
+  endStats: null,
+  menuBoards: [],                // demo boards for menu
+  menuTime: 0,
+  gameTime: 0,
+  menuButtons: [],               // difficulty buttons, populated by _layoutMenuButtons
+  hoveredButton: -1,
+
+  init() {
+    const canvas = document.getElementById('canvas');
+    const container = document.getElementById('game-container');
+    Renderer.init(canvas);
+    VFX.init(container);
+
+    window.addEventListener('resize', () => Renderer.resize());
+
+    // Unified input — use pointerdown for single event on both mouse and touch
+    let lastInputTime = 0;
+    const handleInput = (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      if (now - lastInputTime < 100) return; // debounce
+      lastInputTime = now;
+      AudioEngine.init();
+      AudioEngine.resume();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      this.onClick(x, y);
+    };
+    canvas.addEventListener('pointerdown', handleInput);
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (this.state !== 'MENU') { this.hoveredButton = -1; return; }
+      const rect = canvas.getBoundingClientRect();
+      this.hoveredButton = this._buttonAt(e.clientX - rect.left, e.clientY - rect.top);
+      canvas.style.cursor = this.hoveredButton >= 0 ? 'pointer' : 'default';
+    });
+
+    // Create demo boards for menu
+    this._createMenuBoards();
+
+    // Start loop
+    let last = performance.now();
+    const loop = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+      this.update(dt);
+      this.render();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  },
+
+  _createMenuBoards() {
+    this.menuBoards = [];
+    for (let i = 0; i < 3; i++) {
+      const b = new Board(i, 3);
+      b.reshuffle(Utils.chance(0.5));
+      this.menuBoards.push(b);
+    }
+  },
+
+  // --- STATE TRANSITIONS ---
+  startGame(startLevel) {
+    this.state = 'PLAYING';
+    palette = Utils.pick(PALETTES);
+    ScoreManager.reset();
+    LevelManager.reset();
+    if (startLevel && startLevel > 1) {
+      LevelManager.currentLevel = startLevel;
+      LevelManager._recomputeSpeed();
+      ScoreManager.highestLevel = startLevel;
+    }
+    AdaptiveSystem.reset();
+    VFX.reset();
+    this.boards = [];
+    this.highlightedIndices = [];
+    this.clickedThisHighlight = false;
+    this.gameTime = 0;
+    this._setupLevel();
+    AudioEngine.startMusic();
+  },
+
+  _layoutMenuButtons() {
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const s = Renderer.scale;
+    const bw = 140 * s;
+    const bh = 50 * s;
+    const gap = 20 * s;
+    const total = bw * CONFIG.difficulties.length + gap * (CONFIG.difficulties.length - 1);
+    const startX = cx - total / 2;
+    const y = cy + 160 * s;
+    this.menuButtons = CONFIG.difficulties.map((d, i) => ({
+      label: d.label,
+      sub: `Start at level ${d.startLevel}`,
+      startLevel: d.startLevel,
+      x: startX + i * (bw + gap),
+      y: y,
+      w: bw,
+      h: bh,
+    }));
+  },
+
+  _buttonAt(x, y) {
+    for (let i = 0; i < this.menuButtons.length; i++) {
+      const b = this.menuButtons[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+    }
+    return -1;
+  },
+
+  endGame() {
+    this.state = 'GAME_OVER';
+    this.endStats = ScoreManager.getEndStats();
+    AudioEngine.stopMusic();
+    AudioEngine.playGameOver();
+    VFX.reset();
+  },
+
+  returnToMenu() {
+    this.state = 'MENU';
+    palette = Utils.pick(PALETTES);
+    this._createMenuBoards();
+  },
+
+  // --- LEVEL SETUP ---
+  _setupLevel() {
+    const targetCount = LevelManager.getBoardCount();
+    const currentCount = this.boards.length;
+
+    if (targetCount > currentCount) {
+      // Add boards
+      for (let i = currentCount; i < targetCount; i++) {
+        const b = new Board(i, targetCount);
+        b.reshuffle(AdaptiveSystem.shouldBoardBeValid());
+        this.boards.push(b);
+      }
+    } else if (targetCount < currentCount) {
+      // Remove excess boards
+      this.boards.length = targetCount;
+    }
+
+    // Update indices and re-distribute orbit angles
+    this.boards.forEach((b, i) => {
+      b.index = i;
+      b.orbitAngle = (i / targetCount) * Math.PI * 2;
+    });
+
+    // Mixed rotation
+    if (LevelManager.hasMixedRotation()) {
+      this.boards.forEach(b => { b.rotationDirection = Utils.pick([1, -1]); });
+    }
+
+    // Reset highlight — skip miss check since we're setting up
+    this.highlightedIndices = [];
+    this.clickedThisHighlight = false;
+    this._jumpHighlight();
+  },
+
+  // --- HIGHLIGHT ---
+  _jumpHighlight() {
+    const prevIndices = this.highlightedIndices.slice();
+
+    // Check for missed opportunities on previous highlight
+    if (prevIndices.length > 0 && !this.clickedThisHighlight && this.state === 'PLAYING') {
+      const anyValid = prevIndices.some(i => this.boards[i] && this.boards[i].isValid);
+      if (anyValid) {
+        this._handleMiss();
+        if (this.state !== 'PLAYING') return; // game ended from miss
+      }
+    }
+
+    this.clickedThisHighlight = false;
+
+    if (this.boards.length === 0) return;
+
+    // Choose new highlight target(s)
+    const count = LevelManager.getHighlightCount();
+    const indices = [];
+    const available = this.boards.map((_, i) => i);
+
+    for (let i = 0; i < Math.min(count, available.length); i++) {
+      // Adaptive: bias which boards get highlighted
+      // We pick a board, then potentially swap its validity
+      const idx = available.splice(Utils.randInt(0, available.length - 1), 1)[0];
+      indices.push(idx);
+    }
+
+    // Bias: decide if highlighted boards should be valid based on adaptive system
+    for (const idx of indices) {
+      const shouldBeValid = AdaptiveSystem.shouldBoardBeValid();
+      this.boards[idx].reshuffle(shouldBeValid);
+    }
+
+    this.highlightedIndices = indices;
+    this.highlightTimer = LevelManager.getHighlightDuration();
+    this.highlightVisible = true;
+    this.highlightVisibilityTimer = Utils.randFromRange(CONFIG.level1CircleAppearInterval);
+
+    AudioEngine.playCircleJump();
+  },
+
+  // --- INPUT ---
+  onClick(x, y) {
+    if (this.state === 'MENU') {
+      const btn = this._buttonAt(x, y);
+      if (btn >= 0) {
+        this.startGame(this.menuButtons[btn].startLevel);
+      }
+      return;
+    }
+    if (this.state === 'GAME_OVER') {
+      this.returnToMenu();
+      return;
+    }
+    if (this.state !== 'PLAYING') return;
+    if (this.clickedThisHighlight) return; // already clicked this highlight period
+    this.clickedThisHighlight = true;
+
+    // Is any highlighted board valid?
+    const highlighted = this.highlightedIndices;
+    const isHighlightVisible = this.highlightVisible;
+
+    if (!isHighlightVisible || highlighted.length === 0) {
+      // Clicked with no highlight — misclick
+      this._handleMisclick();
+      return;
+    }
+
+    const anyValid = highlighted.some(i => this.boards[i] && this.boards[i].isValid);
+
+    if (anyValid) {
+      this._handleCorrect();
+    } else {
+      this._handleMisclick();
+    }
+  },
+
+  _handleCorrect() {
+    const result = ScoreManager.recordCorrect(LevelManager.currentLevel);
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+
+    if (result.displayWrong) {
+      // False accusation!
+      VFX.triggerMistakeFeedback();
+      VFX.addNotification(`-${Math.abs(result.displayedPoints)}`, cx, cy, palette.notifBad);
+      AudioEngine.playMistake();
+    } else {
+      VFX.addNotification(`+${result.displayedPoints}`, cx, cy, palette.notifGood);
+      AudioEngine.playCorrect();
+    }
+
+    // Check advancement
+    if (ScoreManager.checkAdvancement()) {
+      LevelManager.advance();
+      VFX.addNotification(`LEVEL ${LevelManager.currentLevel}`, cx, cy - 40, palette.highlight);
+      AudioEngine.playLevelUp();
+      this._setupLevel();
+    }
+  },
+
+  _handleMisclick() {
+    AdaptiveSystem.recordMisclick();
+    const result = ScoreManager.recordMistake('misclick');
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+
+    VFX.triggerMistakeFeedback();
+    VFX.addNotification('WRONG', cx, cy, palette.notifBad);
+    AudioEngine.playMistake();
+
+    if (result.isGameOver) {
+      this.endGame();
+      return;
+    }
+    if (result.shouldDemote && LevelManager.currentLevel > 1) {
+      LevelManager.demote();
+      VFX.addNotification(`LEVEL ${LevelManager.currentLevel}`, cx, cy - 40, palette.notifBad);
+      AudioEngine.playLevelDown();
+      this._setupLevel();
+    }
+  },
+
+  _handleMiss() {
+    AdaptiveSystem.recordMiss();
+    const result = ScoreManager.recordMistake('miss');
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+
+    VFX.triggerMistakeFeedback();
+    VFX.addNotification('MISSED!', cx, cy, palette.notifBad);
+    AudioEngine.playMistake();
+
+    if (result.isGameOver) {
+      this.endGame();
+      return;
+    }
+    if (result.shouldDemote && LevelManager.currentLevel > 1) {
+      LevelManager.demote();
+      VFX.addNotification(`LEVEL ${LevelManager.currentLevel}`, cx, cy - 40, palette.notifBad);
+      AudioEngine.playLevelDown();
+      this._setupLevel();
+    }
+  },
+
+  // --- UPDATE ---
+  update(dt) {
+    if (this.state === 'MENU') {
+      this.menuTime += dt;
+      this._layoutMenuButtons();
+      const cx = Renderer.getCenterX();
+      const cy = Renderer.getCenterY();
+      const radius = Renderer.getOrbitRadius() * 0.6;
+      for (const b of this.menuBoards) {
+        b.selfRotation += 0.3 * dt;
+        b.orbitAngle += 0.15 * dt;
+        b.computePosition(cx, cy - 120 * Renderer.scale, radius);
+      }
+      return;
+    }
+
+    if (this.state === 'GAME_OVER') return;
+
+    // PLAYING state
+    this.gameTime += dt;
+    LevelManager.update(dt);
+    VFX.update(dt);
+
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const orbitRadius = this.boards.length === 1 ? 0 : Renderer.getOrbitRadius();
+    const selfSpeed = LevelManager.getSelfRotationSpeed();
+    const orbitSpeed = LevelManager.getOrbitSpeed();
+    const orbitDir = LevelManager.orbitDirection;
+
+    // Update boards
+    for (let bi = 0; bi < this.boards.length; bi++) {
+      const board = this.boards[bi];
+      // Compute effective rotation direction
+      let effectiveRotDir;
+      if (LevelManager.hasMixedRotation()) {
+        effectiveRotDir = board.rotationDirection;
+      } else if (LevelManager.hasDirectionSwitches()) {
+        effectiveRotDir = board.rotationDirection * LevelManager.globalRotationFlip;
+      } else {
+        effectiveRotDir = board.rotationDirection;
+      }
+
+      // Directly update rotation and orbit without mutating base direction
+      board.selfRotation += selfSpeed * effectiveRotDir * dt;
+      board.orbitAngle += orbitSpeed * orbitDir * dt;
+      board.reshuffleTimer -= dt;
+
+      if (board.reshuffleTimer <= 0) {
+        board.reshuffleTimer = Utils.randFromRange(CONFIG.boardReshuffleInterval);
+        // Only reshuffle non-highlighted boards
+        if (!this.highlightedIndices.includes(bi)) {
+          board.reshuffle(AdaptiveSystem.shouldBoardBeValid());
+        }
+      }
+
+      board.computePosition(cx, cy, orbitRadius);
+    }
+
+    // Highlight timer
+    if (this.boards.length === 1) {
+      // Level 1: toggle visibility
+      this.highlightVisibilityTimer -= dt;
+      if (this.highlightVisibilityTimer <= 0) {
+        if (this.highlightVisible) {
+          // Was visible, now hide — check for miss
+          if (!this.clickedThisHighlight && this.boards[0] && this.boards[0].isValid) {
+            this._handleMiss();
+            if (this.state !== 'PLAYING') return;
+          }
+          this.highlightVisible = false;
+          this.highlightVisibilityTimer = Utils.randFromRange(CONFIG.level1CircleHideInterval);
+          this.clickedThisHighlight = false;
+        } else {
+          // Was hidden, now show
+          this.highlightVisible = true;
+          this.highlightVisibilityTimer = Utils.randFromRange(CONFIG.level1CircleAppearInterval);
+          this.clickedThisHighlight = false;
+          // Reshuffle the board when circle reappears
+          this.boards[0].reshuffle(AdaptiveSystem.shouldBoardBeValid());
+          AudioEngine.playCircleJump();
+        }
+      }
+    } else {
+      this.highlightTimer -= dt;
+      if (this.highlightTimer <= 0) {
+        this._jumpHighlight();
+        if (this.state !== 'PLAYING') return;
+      }
+    }
+  },
+
+  // --- RENDER ---
+  render() {
+    if (this.state === 'MENU') {
+      Renderer.drawMenuScreen();
+      const size = Renderer.getBoardSize();
+      for (const b of this.menuBoards) {
+        Renderer.drawBoard(b, size);
+      }
+      Renderer.drawMenuButtons(this.menuButtons, this.hoveredButton);
+      return;
+    }
+
+    if (this.state === 'GAME_OVER') {
+      Renderer.drawGameOverScreen(this.endStats);
+      return;
+    }
+
+    // PLAYING
+    const cx = Renderer.getCenterX();
+    const cy = Renderer.getCenterY();
+    const orbitRadius = this.boards.length === 1 ? 0 : Renderer.getOrbitRadius();
+    const boardSize = Renderer.getBoardSize();
+
+    Renderer.clear();
+
+    if (this.boards.length > 1) {
+      Renderer.drawOrbitPath(cx, cy, orbitRadius);
+    }
+
+    // Draw boards
+    for (const board of this.boards) {
+      Renderer.drawBoard(board, boardSize);
+    }
+
+    // Draw highlights
+    if (this.highlightVisible) {
+      for (const idx of this.highlightedIndices) {
+        if (this.boards[idx]) {
+          Renderer.drawHighlight(this.boards[idx], boardSize, this.gameTime);
+        }
+      }
+    }
+
+    // Smiley
+    if (VFX.smileyActive) {
+      Renderer.drawSmiley(cx, cy, VFX.smileyOpacity);
+    }
+
+    // Notifications
+    Renderer.drawNotifications();
+
+    // HUD
+    Renderer.drawHUD(LevelManager.currentLevel);
+  },
+};
+
+// ============================================================
+// BOOTSTRAP
+// ============================================================
+Game.init();
+</script>
+</body>
+</html>
